@@ -108,10 +108,13 @@ export async function injectMarkers(page: Page): Promise<MarkerMapping> {
 }
 
 export async function removeMarkers(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const markers = document.querySelectorAll(".som-marker-overlay");
-    markers.forEach((el) => el.remove());
-  });
+  try {
+    await page.evaluate(() => {
+      const markers = document.querySelectorAll(".som-marker-overlay");
+      markers.forEach((el) => el.remove());
+    });
+  } catch {
+  }
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -283,9 +286,8 @@ export async function runAgentLoop(
         message: `AI decided: ${action.action}${action.targetNumber ? ` on element #${action.targetNumber}` : ""}${action.textToType ? ` with text "${action.textToType}"` : ""} — ${action.reasoning || ""}`,
       });
 
-      await removeMarkers(page);
-
       if (action.action === "done") {
+        await removeMarkers(page);
         send({ type: "status", message: "Goal accomplished!" });
         send({ type: "log", message: "Agent completed the task." });
 
@@ -295,12 +297,18 @@ export async function runAgentLoop(
         break;
       }
 
+      try {
+        await removeMarkers(page);
+      } catch { }
+
       if (action.action === "click" && action.targetNumber) {
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
           await page.mouse.move(target.x, target.y, { steps: 10 });
+          const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
+          await navigationPromise;
           previousActions.push(`Clicked element #${action.targetNumber} (${target.tag}: "${target.text}")`);
         } else {
           send({ type: "log", message: `Warning: Element #${action.targetNumber} not found in mapping` });
@@ -313,7 +321,9 @@ export async function runAgentLoop(
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
           await page.keyboard.type(action.textToType, { delay: 50 });
+          const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.keyboard.press("Enter");
+          await navigationPromise;
           previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}")`);
         } else {
           send({ type: "log", message: `Warning: Element #${action.targetNumber} not found` });
@@ -325,7 +335,7 @@ export async function runAgentLoop(
         previousActions.push("Scrolled down the page");
       }
 
-      await page.waitForTimeout(2000);
+      await new Promise(r => setTimeout(r, 1500));
 
       if (step === MAX_STEPS) {
         send({ type: "status", message: "Reached maximum steps." });
