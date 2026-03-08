@@ -164,9 +164,9 @@ async function moveCursorFluidly(
       }, { tx: Math.round(cx), ty: Math.round(cy) });
     } catch {}
     await new Promise(r => setTimeout(r, 120));
+    const frameSrc = await takeScreenshot(page);
+    send({ type: "frame", screenshot: frameSrc });
   }
-  const shot = await takeScreenshot(page);
-  send({ type: "screenshot", screenshot: shot, step });
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -434,7 +434,7 @@ export async function runAgentLoop(
             await page.keyboard.type(chars[ci], { delay: 60 });
             if (ci % 3 === 2 || ci === chars.length - 1) {
               const typingShot = await takeScreenshot(page);
-              send({ type: "screenshot", screenshot: typingShot, step });
+              send({ type: "frame", screenshot: typingShot });
             }
           }
           await new Promise(r => setTimeout(r, 300));

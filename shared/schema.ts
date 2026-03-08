@@ -20,7 +20,7 @@ export interface WsMessageToServer {
 }
 
 export interface WsMessageToClient {
-  type: "screenshot" | "action" | "status" | "error" | "done" | "log";
+  type: "screenshot" | "frame" | "action" | "status" | "error" | "done" | "log";
   screenshot?: string;
   action?: AgentAction;
   message?: string;
