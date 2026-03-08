@@ -61,8 +61,8 @@ export async function injectMarkers(page: Page): Promise<MarkerMapping> {
         top: ${rect.top + window.scrollY}px;
         width: ${rect.width}px;
         height: ${rect.height}px;
-        border: 2px solid #FF1744;
-        background: rgba(255, 23, 68, 0.08);
+        border: 2px solid rgba(56, 189, 248, 0.8);
+        background: rgba(56, 189, 248, 0.1);
         z-index: 999999;
         pointer-events: none;
         box-sizing: border-box;
@@ -73,12 +73,12 @@ export async function injectMarkers(page: Page): Promise<MarkerMapping> {
         position: absolute;
         top: -2px;
         left: -2px;
-        background: #FF1744;
-        color: white;
+        background: #0f172a;
+        color: #38bdf8;
         font-size: 11px;
         font-weight: bold;
-        padding: 1px 4px;
-        border-radius: 0 0 4px 0;
+        padding: 2px 6px;
+        border-radius: 4px;
         z-index: 1000000;
         font-family: monospace;
         line-height: 1.2;
@@ -115,6 +115,28 @@ export async function removeMarkers(page: Page): Promise<void> {
     });
   } catch {
   }
+}
+
+async function ensureGhostCursor(page: Page): Promise<void> {
+  try {
+    const exists = await page.evaluate(() => !!document.getElementById("som-ghost-cursor"));
+    if (!exists) {
+      await page.addStyleTag({ content: `
+        #som-ghost-cursor {
+          position: absolute; top: 0; left: 0; width: 24px; height: 24px;
+          pointer-events: none; z-index: 2147483647;
+          transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+        }
+      `});
+      await page.evaluate(() => {
+        const el = document.createElement("div");
+        el.id = "som-ghost-cursor";
+        el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#38bdf8" stroke="white" stroke-width="2" stroke-linejoin="round"><path d="M5 3L19 12L12 13L9 20L5 3Z"/></svg>';
+        document.body.appendChild(el);
+      });
+    }
+  } catch {}
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -235,6 +257,21 @@ export async function runAgentLoop(
     await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(2000);
 
+    await page.addStyleTag({ content: `
+      #som-ghost-cursor {
+        position: absolute; top: 0; left: 0; width: 24px; height: 24px;
+        pointer-events: none; z-index: 2147483647;
+        transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+      }
+    `});
+    await page.evaluate(() => {
+      const el = document.createElement("div");
+      el.id = "som-ghost-cursor";
+      el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#38bdf8" stroke="white" stroke-width="2" stroke-linejoin="round"><path d="M5 3L19 12L12 13L9 20L5 3Z"/></svg>';
+      document.body.appendChild(el);
+    });
+
     const MAX_STEPS = 15;
     const previousActions: string[] = [];
 
@@ -246,6 +283,8 @@ export async function runAgentLoop(
 
       send({ type: "status", message: `Step ${step}: Analyzing page...` });
       send({ type: "log", message: `--- Step ${step} ---` });
+
+      await ensureGhostCursor(page);
 
       const mapping = await injectMarkers(page);
       const markerCount = Object.keys(mapping).length;
@@ -305,7 +344,13 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
-          await page.mouse.move(target.x, target.y, { steps: 10 });
+          try {
+            await page.evaluate(({x, y}) => {
+              const c = document.getElementById("som-ghost-cursor");
+              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+            }, { x: target.x, y: target.y });
+          } catch {}
+          await page.mouse.move(target.x, target.y, { steps: 25 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
           await navigationPromise;
@@ -318,6 +363,13 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Typing into element #${action.targetNumber}...` });
+          try {
+            await page.evaluate(({x, y}) => {
+              const c = document.getElementById("som-ghost-cursor");
+              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+            }, { x: target.x, y: target.y });
+          } catch {}
+          await page.mouse.move(target.x, target.y, { steps: 25 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
           await page.keyboard.type(action.textToType, { delay: 50 });
