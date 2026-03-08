@@ -140,6 +140,35 @@ async function ensureGhostCursor(page: Page): Promise<void> {
   } catch {}
 }
 
+async function moveCursorFluidly(
+  page: Page,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  send: (msg: WsMessageToClient) => void,
+  step: number
+): Promise<void> {
+  const waypoints = 4;
+  for (let i = 1; i <= waypoints; i++) {
+    const progress = i / waypoints;
+    const ease = progress < 0.5
+      ? 2 * progress * progress
+      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+    const cx = fromX + (toX - fromX) * ease;
+    const cy = fromY + (toY - fromY) * ease;
+    try {
+      await page.evaluate(({ tx, ty }) => {
+        const cursor = document.getElementById("som-ghost-cursor");
+        if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
+      }, { tx: Math.round(cx), ty: Math.round(cy) });
+    } catch {}
+    await new Promise(r => setTimeout(r, 120));
+  }
+  const shot = await takeScreenshot(page);
+  send({ type: "screenshot", screenshot: shot, step });
+}
+
 async function takeScreenshot(page: Page): Promise<string> {
   const buffer = await page.screenshot({
     type: "jpeg",
@@ -196,22 +225,31 @@ Rules:
   const rawText = response.text || "";
   log(`Gemini raw response: ${rawText}`, "agent");
 
-  const cleaned = rawText
-    .replace(/```json\s*/g, "")
+  let cleaned = rawText
+    .replace(/```json\s*/gi, "")
     .replace(/```\s*/g, "")
     .trim();
 
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+
   try {
     const parsed = JSON.parse(cleaned);
+    const action = parsed.action;
+    if (!action || !["click", "type", "scroll", "done"].includes(action)) {
+      throw new Error(`Invalid action: ${action}`);
+    }
     return {
-      action: parsed.action || "done",
+      action: parsed.action,
       targetNumber: parsed.targetNumber,
       textToType: parsed.textToType,
       reasoning: parsed.reasoning,
     };
-  } catch {
+  } catch (e: any) {
     log(`Failed to parse Gemini response: ${cleaned}`, "agent");
-    throw new Error(`Failed to parse AI response: ${cleaned.slice(0, 200)}`);
+    throw new Error(`Failed to parse AI response: ${e.message}`);
   }
 }
 
@@ -285,6 +323,8 @@ export async function runAgentLoop(
 
     const MAX_STEPS = 15;
     const previousActions: string[] = [];
+    let cursorX = 0;
+    let cursorY = 0;
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (shouldStop()) {
@@ -309,7 +349,7 @@ export async function runAgentLoop(
       send({ type: "status", message: `Step ${step}: Thinking...` });
       let action: AgentAction;
       let retries = 0;
-      const MAX_RETRIES = 2;
+      const MAX_RETRIES = 3;
       while (true) {
         try {
           action = await askGemini(screenshot, goal, step, previousActions);
@@ -355,15 +395,9 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
-          try {
-            await page.evaluate(({ tx, ty }) => {
-              const cursor = document.getElementById("som-ghost-cursor");
-              if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
-            }, { tx: target.x, ty: target.y });
-          } catch {}
-          await new Promise(r => setTimeout(r, 500));
-          const cursorShot = await takeScreenshot(page);
-          send({ type: "screenshot", screenshot: cursorShot, step });
+          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
+          cursorX = target.x;
+          cursorY = target.y;
           await page.mouse.move(target.x, target.y, { steps: 10 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
@@ -377,19 +411,21 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Typing into element #${action.targetNumber}...` });
-          try {
-            await page.evaluate(({ tx, ty }) => {
-              const cursor = document.getElementById("som-ghost-cursor");
-              if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
-            }, { tx: target.x, ty: target.y });
-          } catch {}
-          await new Promise(r => setTimeout(r, 500));
-          const cursorShot = await takeScreenshot(page);
-          send({ type: "screenshot", screenshot: cursorShot, step });
+          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
+          cursorX = target.x;
+          cursorY = target.y;
           await page.mouse.move(target.x, target.y, { steps: 10 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
-          await page.keyboard.type(action.textToType, { delay: 50 });
+          const chars = action.textToType.split("");
+          for (let ci = 0; ci < chars.length; ci++) {
+            await page.keyboard.type(chars[ci], { delay: 60 });
+            if (ci % 3 === 2 || ci === chars.length - 1) {
+              const typingShot = await takeScreenshot(page);
+              send({ type: "screenshot", screenshot: typingShot, step });
+            }
+          }
+          await new Promise(r => setTimeout(r, 300));
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.keyboard.press("Enter");
           await navigationPromise;
