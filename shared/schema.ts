@@ -1,18 +1,29 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+export const agentActionSchema = z.object({
+  action: z.enum(["click", "type", "scroll", "done"]),
+  targetNumber: z.number().optional(),
+  textToType: z.string().optional(),
+  reasoning: z.string().optional(),
 });
 
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
+export type AgentAction = z.infer<typeof agentActionSchema>;
 
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export interface MarkerMapping {
+  [id: number]: { x: number; y: number; tag: string; text: string };
+}
+
+export interface WsMessageToServer {
+  type: "start_agent" | "stop_agent";
+  goal?: string;
+  startUrl?: string;
+}
+
+export interface WsMessageToClient {
+  type: "screenshot" | "action" | "status" | "error" | "done" | "log";
+  screenshot?: string;
+  action?: AgentAction;
+  message?: string;
+  step?: number;
+  totalMarkers?: number;
+}
