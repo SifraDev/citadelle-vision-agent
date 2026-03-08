@@ -123,10 +123,11 @@ async function ensureGhostCursor(page: Page): Promise<void> {
     if (!exists) {
       await page.addStyleTag({ content: `
         #som-ghost-cursor {
-          position: absolute; top: 0; left: 0; width: 24px; height: 24px;
-          pointer-events: none; z-index: 2147483647;
-          transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+          position: absolute !important; top: 0; left: 0; width: 28px; height: 28px;
+          pointer-events: none !important; z-index: 2147483647 !important;
+          transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1) !important;
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+          will-change: transform;
         }
       `});
       await page.evaluate(() => {
@@ -268,10 +269,11 @@ export async function runAgentLoop(
 
     await page.addStyleTag({ content: `
       #som-ghost-cursor {
-        position: absolute; top: 0; left: 0; width: 24px; height: 24px;
-        pointer-events: none; z-index: 2147483647;
-        transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
+        position: absolute !important; top: 0; left: 0; width: 28px; height: 28px;
+        pointer-events: none !important; z-index: 2147483647 !important;
+        transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1) !important;
         filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+        will-change: transform;
       }
     `});
     await page.evaluate(() => {
@@ -354,12 +356,13 @@ export async function runAgentLoop(
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
           try {
-            await page.evaluate(({x, y}) => {
-              const c = document.getElementById("som-ghost-cursor");
-              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
-            }, { x: target.x, y: target.y });
+            await page.evaluate(({ tx, ty }) => {
+              const cursor = document.getElementById("som-ghost-cursor");
+              if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
+            }, { tx: target.x, ty: target.y });
           } catch {}
-          await page.mouse.move(target.x, target.y, { steps: 25 });
+          await new Promise(r => setTimeout(r, 500));
+          await page.mouse.move(target.x, target.y, { steps: 10 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
           await navigationPromise;
@@ -373,12 +376,13 @@ export async function runAgentLoop(
         if (target) {
           send({ type: "status", message: `Step ${step}: Typing into element #${action.targetNumber}...` });
           try {
-            await page.evaluate(({x, y}) => {
-              const c = document.getElementById("som-ghost-cursor");
-              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
-            }, { x: target.x, y: target.y });
+            await page.evaluate(({ tx, ty }) => {
+              const cursor = document.getElementById("som-ghost-cursor");
+              if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
+            }, { tx: target.x, ty: target.y });
           } catch {}
-          await page.mouse.move(target.x, target.y, { steps: 25 });
+          await new Promise(r => setTimeout(r, 500));
+          await page.mouse.move(target.x, target.y, { steps: 10 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
           await page.keyboard.type(action.textToType, { delay: 50 });
