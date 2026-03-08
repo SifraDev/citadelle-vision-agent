@@ -389,9 +389,6 @@ export async function runAgentLoop(
             }
           }
           await new Promise(r => setTimeout(r, 1000));
-          const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
-          await page.keyboard.press("Enter");
-          await navigationPromise;
           previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}")`);
         } else {
           send({ type: "log", message: `Warning: Element #${action.targetNumber} not found` });
