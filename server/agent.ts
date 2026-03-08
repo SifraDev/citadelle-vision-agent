@@ -246,7 +246,7 @@ export async function runAgentLoop(
     const context = await b.newContext({
       viewport: { width: 1280, height: 800 },
       userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     });
     page = await context.newPage();
 
@@ -254,8 +254,17 @@ export async function runAgentLoop(
     send({ type: "log", message: `Goal: "${goal}"` });
     send({ type: "log", message: `Navigating to: ${startUrl}` });
 
-    await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(2000);
+    try {
+      await page.goto(startUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    } catch (navError: any) {
+      if (navError.message.includes("Timeout")) {
+        log("Navigation timeout reached, but proceeding with available DOM...", "agent");
+        send({ type: "log", message: "Navigation timeout reached, proceeding with available DOM..." });
+      } else {
+        throw navError;
+      }
+    }
+    await new Promise(r => setTimeout(r, 1000));
 
     await page.addStyleTag({ content: `
       #som-ghost-cursor {
