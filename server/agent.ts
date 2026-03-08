@@ -204,25 +204,34 @@ Rules:
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            inlineData: {
-              data: screenshotBase64,
-              mimeType: "image/jpeg",
+  let rawText = "";
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                data: screenshotBase64,
+                mimeType: "image/jpeg",
+              },
             },
-          },
-          { text: prompt },
-        ],
-      },
-    ],
-  });
+            { text: prompt },
+          ],
+        },
+      ],
+    });
+    rawText = response.text || "";
+  } catch (apiErr: any) {
+    log(`Gemini API error: ${apiErr.message}`, "agent");
+    throw new Error(`Gemini API error: ${apiErr.message}`);
+  }
 
-  const rawText = response.text || "";
+  if (!rawText.trim()) {
+    throw new Error("Gemini returned an empty response");
+  }
   log(`Gemini raw response: ${rawText}`, "agent");
 
   let cleaned = rawText
@@ -356,12 +365,15 @@ export async function runAgentLoop(
           break;
         } catch (parseErr: any) {
           retries++;
+          const errMsg = parseErr?.message || String(parseErr);
+          log(`AI attempt ${retries} failed: ${errMsg}`, "agent");
           if (retries > MAX_RETRIES) {
-            send({ type: "log", message: `Failed to get valid AI response after ${MAX_RETRIES} retries` });
-            send({ type: "error", message: "AI returned invalid responses. Stopping." });
+            send({ type: "log", message: `Failed after ${MAX_RETRIES} retries: ${errMsg}` });
+            send({ type: "error", message: `AI error: ${errMsg.slice(0, 150)}` });
             return;
           }
-          send({ type: "log", message: `AI response parse error, retrying (${retries}/${MAX_RETRIES})...` });
+          send({ type: "log", message: `AI error (attempt ${retries}/${MAX_RETRIES}): ${errMsg.slice(0, 100)}` });
+          await new Promise(r => setTimeout(r, 2000 * retries));
         }
       }
 
