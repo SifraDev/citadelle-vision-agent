@@ -362,6 +362,8 @@ export async function runAgentLoop(
             }, { tx: target.x, ty: target.y });
           } catch {}
           await new Promise(r => setTimeout(r, 500));
+          const cursorShot = await takeScreenshot(page);
+          send({ type: "screenshot", screenshot: cursorShot, step });
           await page.mouse.move(target.x, target.y, { steps: 10 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
@@ -382,6 +384,8 @@ export async function runAgentLoop(
             }, { tx: target.x, ty: target.y });
           } catch {}
           await new Promise(r => setTimeout(r, 500));
+          const cursorShot = await takeScreenshot(page);
+          send({ type: "screenshot", screenshot: cursorShot, step });
           await page.mouse.move(target.x, target.y, { steps: 10 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
