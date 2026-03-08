@@ -1,0 +1,50 @@
+PROJECT INITIATION: MULTIMODAL UI NAVIGATOR AGENT (SET-OF-MARK)
+
+Build a complete Web Agent application from scratch using Node.js, Express, Playwright, and the @google/genai SDK. This is a submission for the Gemini Live Agent Challenge (UI Navigator category).
+
+Core Architecture:
+DO NOT use the native computerUse tool or Vertex AI. We will implement a custom visual agent using the Set-of-Mark (SoM) technique with the standard gemini-2.5-flash model via a standard public API key (process.env.GOOGLE_GEMINI_API_KEY).
+
+Requirements:
+
+1. Backend (Express & Playwright):
+
+Create a WebSocket server to communicate with the frontend.
+
+Launch a headless Playwright Chromium instance.
+
+Implement a function injectMarkers(page): It must find all interactable elements (a, button, input) and inject absolute-positioned, brightly colored bounding boxes over them. Each box MUST have a unique visible integer label (e.g., [1], [2], [3]). Return a mapping of these IDs to their exact {x, y} center coordinates.
+
+Implement a function removeMarkers(page) to clean the DOM after.
+
+2. The Agent Loop (AI Integration):
+
+The user sends a natural language goal (e.g., "Search for Elon Musk lawsuits on CourtListener").
+
+Step A: Page loads, injectMarkers() is called.
+
+Step B: Take a full-page screenshot.
+
+Step C: Send the screenshot and the user's goal to gemini-2.5-flash. The prompt must strictly say: "You are a UI automation agent. The user wants to: '${goal}'. Look at the provided screenshot. Interactable elements have numbered bounding boxes. Decide the next logical action. Return ONLY a JSON object: { "action": "click" | "type" | "done", "targetNumber": integer, "textToType": "string (if typing)" }. Do not return markdown, just the JSON."
+
+Step D: Parse the AI's JSON.
+
+If click, find the coordinates for targetNumber, call removeMarkers(), move the mouse fluidly, and click.
+
+If type, click the coordinate, type the text, and press Enter.
+
+If done, terminate the loop.
+
+Stream the live screenshots (base64) and the AI's reasoning back to the WebSocket client after every action.
+
+3. Frontend (React/Vite or basic HTML/Vanilla JS):
+
+Build a clean dashboard UI.
+
+A chat/input bar to enter the web navigation goal.
+
+A live "Sandbox" image viewer that displays the base64 frames streamed from the WebSocket, showing the user exactly what the Agent sees in real-time.
+
+A side panel displaying the logs and current actions of the Agent.
+
+Implement the complete working code. Ensure all dependencies (playwright, @google/genai, ws, express) are added to package.json. Focus on making the Playwright mouse movements visible and the marker injection robust.
