@@ -63,11 +63,6 @@ export function useAgentWebSocket() {
             }
             if (msg.step) setCurrentStep(msg.step);
             break;
-          case "frame":
-            if (msg.screenshot) {
-              setScreenshot(`data:image/jpeg;base64,${msg.screenshot}`);
-            }
-            break;
           case "action":
             if (msg.action) {
               addLog(

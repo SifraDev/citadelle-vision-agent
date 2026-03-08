@@ -123,11 +123,10 @@ async function ensureGhostCursor(page: Page): Promise<void> {
     if (!exists) {
       await page.addStyleTag({ content: `
         #som-ghost-cursor {
-          position: absolute !important; top: 0; left: 0; width: 28px; height: 28px;
-          pointer-events: none !important; z-index: 2147483647 !important;
-          transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1) !important;
+          position: absolute; top: 0; left: 0; width: 24px; height: 24px;
+          pointer-events: none; z-index: 2147483647;
+          transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-          will-change: transform;
         }
       `});
       await page.evaluate(() => {
@@ -138,35 +137,6 @@ async function ensureGhostCursor(page: Page): Promise<void> {
       });
     }
   } catch {}
-}
-
-async function moveCursorFluidly(
-  page: Page,
-  fromX: number,
-  fromY: number,
-  toX: number,
-  toY: number,
-  send: (msg: WsMessageToClient) => void,
-  step: number
-): Promise<void> {
-  const waypoints = 4;
-  for (let i = 1; i <= waypoints; i++) {
-    const progress = i / waypoints;
-    const ease = progress < 0.5
-      ? 2 * progress * progress
-      : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-    const cx = fromX + (toX - fromX) * ease;
-    const cy = fromY + (toY - fromY) * ease;
-    try {
-      await page.evaluate(({ tx, ty }) => {
-        const cursor = document.getElementById("som-ghost-cursor");
-        if (cursor) cursor.style.transform = `translate3d(${tx}px, ${ty}px, 0)`;
-      }, { tx: Math.round(cx), ty: Math.round(cy) });
-    } catch {}
-    await new Promise(r => setTimeout(r, 120));
-    const frameSrc = await takeScreenshot(page);
-    send({ type: "frame", screenshot: frameSrc });
-  }
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -204,61 +174,43 @@ Rules:
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical`;
 
-  let rawText = "";
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                data: screenshotBase64,
-                mimeType: "image/jpeg",
-              },
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              data: screenshotBase64,
+              mimeType: "image/jpeg",
             },
-            { text: prompt },
-          ],
-        },
-      ],
-    });
-    rawText = response.text || "";
-  } catch (apiErr: any) {
-    log(`Gemini API error: ${apiErr.message}`, "agent");
-    throw new Error(`Gemini API error: ${apiErr.message}`);
-  }
+          },
+          { text: prompt },
+        ],
+      },
+    ],
+  });
 
-  if (!rawText.trim()) {
-    throw new Error("Gemini returned an empty response");
-  }
+  const rawText = response.text || "";
   log(`Gemini raw response: ${rawText}`, "agent");
 
-  let cleaned = rawText
-    .replace(/```json\s*/gi, "")
+  const cleaned = rawText
+    .replace(/```json\s*/g, "")
     .replace(/```\s*/g, "")
     .trim();
 
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[0];
-  }
-
   try {
     const parsed = JSON.parse(cleaned);
-    const action = parsed.action;
-    if (!action || !["click", "type", "scroll", "done"].includes(action)) {
-      throw new Error(`Invalid action: ${action}`);
-    }
     return {
-      action: parsed.action,
+      action: parsed.action || "done",
       targetNumber: parsed.targetNumber,
       textToType: parsed.textToType,
       reasoning: parsed.reasoning,
     };
-  } catch (e: any) {
+  } catch {
     log(`Failed to parse Gemini response: ${cleaned}`, "agent");
-    throw new Error(`Failed to parse AI response: ${e.message}`);
+    throw new Error(`Failed to parse AI response: ${cleaned.slice(0, 200)}`);
   }
 }
 
@@ -316,11 +268,10 @@ export async function runAgentLoop(
 
     await page.addStyleTag({ content: `
       #som-ghost-cursor {
-        position: absolute !important; top: 0; left: 0; width: 28px; height: 28px;
-        pointer-events: none !important; z-index: 2147483647 !important;
-        transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1) !important;
+        position: absolute; top: 0; left: 0; width: 24px; height: 24px;
+        pointer-events: none; z-index: 2147483647;
+        transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
         filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-        will-change: transform;
       }
     `});
     await page.evaluate(() => {
@@ -332,8 +283,6 @@ export async function runAgentLoop(
 
     const MAX_STEPS = 15;
     const previousActions: string[] = [];
-    let cursorX = 0;
-    let cursorY = 0;
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (shouldStop()) {
@@ -358,22 +307,19 @@ export async function runAgentLoop(
       send({ type: "status", message: `Step ${step}: Thinking...` });
       let action: AgentAction;
       let retries = 0;
-      const MAX_RETRIES = 3;
+      const MAX_RETRIES = 2;
       while (true) {
         try {
           action = await askGemini(screenshot, goal, step, previousActions);
           break;
         } catch (parseErr: any) {
           retries++;
-          const errMsg = parseErr?.message || String(parseErr);
-          log(`AI attempt ${retries} failed: ${errMsg}`, "agent");
           if (retries > MAX_RETRIES) {
-            send({ type: "log", message: `Failed after ${MAX_RETRIES} retries: ${errMsg}` });
-            send({ type: "error", message: `AI error: ${errMsg.slice(0, 150)}` });
+            send({ type: "log", message: `Failed to get valid AI response after ${MAX_RETRIES} retries` });
+            send({ type: "error", message: "AI returned invalid responses. Stopping." });
             return;
           }
-          send({ type: "log", message: `AI error (attempt ${retries}/${MAX_RETRIES}): ${errMsg.slice(0, 100)}` });
-          await new Promise(r => setTimeout(r, 2000 * retries));
+          send({ type: "log", message: `AI response parse error, retrying (${retries}/${MAX_RETRIES})...` });
         }
       }
 
@@ -407,10 +353,13 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
-          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
-          cursorX = target.x;
-          cursorY = target.y;
-          await page.mouse.move(target.x, target.y, { steps: 10 });
+          try {
+            await page.evaluate(({x, y}) => {
+              const c = document.getElementById("som-ghost-cursor");
+              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+            }, { x: target.x, y: target.y });
+          } catch {}
+          await page.mouse.move(target.x, target.y, { steps: 25 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
           await navigationPromise;
@@ -423,21 +372,16 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Typing into element #${action.targetNumber}...` });
-          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
-          cursorX = target.x;
-          cursorY = target.y;
-          await page.mouse.move(target.x, target.y, { steps: 10 });
+          try {
+            await page.evaluate(({x, y}) => {
+              const c = document.getElementById("som-ghost-cursor");
+              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+            }, { x: target.x, y: target.y });
+          } catch {}
+          await page.mouse.move(target.x, target.y, { steps: 25 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
-          const chars = action.textToType.split("");
-          for (let ci = 0; ci < chars.length; ci++) {
-            await page.keyboard.type(chars[ci], { delay: 60 });
-            if (ci % 3 === 2 || ci === chars.length - 1) {
-              const typingShot = await takeScreenshot(page);
-              send({ type: "frame", screenshot: typingShot });
-            }
-          }
-          await new Promise(r => setTimeout(r, 300));
+          await page.keyboard.type(action.textToType, { delay: 50 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.keyboard.press("Enter");
           await navigationPromise;
