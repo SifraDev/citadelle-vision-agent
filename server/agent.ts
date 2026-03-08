@@ -6,33 +6,12 @@ import { log } from "./index";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-let browser: Browser | null = null;
-
 function findChromium(): string {
   try {
     return execSync("which chromium").toString().trim();
   } catch {
     return "chromium";
   }
-}
-
-export async function getBrowser(): Promise<Browser> {
-  if (!browser || !browser.isConnected()) {
-    browser = await chromium.launch({
-      executablePath: findChromium(),
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--no-first-run",
-        "--no-zygote",
-        "--single-process",
-      ],
-    });
-  }
-  return browser;
 }
 
 export async function injectMarkers(page: Page): Promise<MarkerMapping> {
@@ -125,7 +104,6 @@ async function ensureGhostCursor(page: Page): Promise<void> {
         #som-ghost-cursor {
           position: absolute; top: 0; left: 0; width: 24px; height: 24px;
           pointer-events: none; z-index: 2147483647;
-          transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
         }
       `});
@@ -137,6 +115,31 @@ async function ensureGhostCursor(page: Page): Promise<void> {
       });
     }
   } catch {}
+}
+
+async function moveCursorFluidly(
+  page: Page,
+  fromX: number, fromY: number,
+  toX: number, toY: number,
+  send: (msg: WsMessageToClient) => void,
+  step: number
+): Promise<void> {
+  const totalSteps = 80;
+  for (let i = 1; i <= totalSteps; i++) {
+    const nextX = fromX + (toX - fromX) * (i / totalSteps);
+    const nextY = fromY + (toY - fromY) * (i / totalSteps);
+    try {
+      await page.evaluate(({x, y}) => {
+        const c = document.getElementById("som-ghost-cursor");
+        if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+      }, { x: nextX, y: nextY });
+    } catch {}
+    await page.mouse.move(nextX, nextY, { steps: 1 });
+    if (i % 6 === 0 || i === totalSteps) {
+      const snap = await takeScreenshot(page);
+      send({ type: "screenshot", screenshot: snap, step });
+    }
+  }
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -175,7 +178,7 @@ Rules:
 - Be precise and methodical`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite",
     contents: [
       {
         role: "user",
@@ -239,11 +242,27 @@ export async function runAgentLoop(
     return;
   }
 
+  let localBrowser: Browser | null = null;
   let page: Page | null = null;
+  let cursorX = 0;
+  let cursorY = 0;
 
   try {
-    const b = await getBrowser();
-    const context = await b.newContext({
+    localBrowser = await chromium.launch({
+      executablePath: findChromium(),
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-first-run",
+        "--no-zygote",
+        "--single-process",
+      ],
+    });
+
+    const context = await localBrowser.newContext({
       viewport: { width: 1280, height: 800 },
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -266,20 +285,7 @@ export async function runAgentLoop(
     }
     await new Promise(r => setTimeout(r, 1000));
 
-    await page.addStyleTag({ content: `
-      #som-ghost-cursor {
-        position: absolute; top: 0; left: 0; width: 24px; height: 24px;
-        pointer-events: none; z-index: 2147483647;
-        transition: transform 0.15s cubic-bezier(0.25, 0.1, 0.25, 1);
-        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-      }
-    `});
-    await page.evaluate(() => {
-      const el = document.createElement("div");
-      el.id = "som-ghost-cursor";
-      el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#38bdf8" stroke="white" stroke-width="2" stroke-linejoin="round"><path d="M5 3L19 12L12 13L9 20L5 3Z"/></svg>';
-      document.body.appendChild(el);
-    });
+    await ensureGhostCursor(page);
 
     const MAX_STEPS = 15;
     const previousActions: string[] = [];
@@ -354,25 +360,9 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Clicking element #${action.targetNumber}...` });
-          try {
-            await page.evaluate(({x, y}) => {
-              const c = document.getElementById("som-ghost-cursor");
-              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
-            }, { x: target.x, y: target.y });
-          } catch {}
-          const totalMoveSteps = 25;
-          for (let ms = 0; ms < totalMoveSteps; ms++) {
-            await page.mouse.move(
-              target.x * (ms + 1) / totalMoveSteps,
-              target.y * (ms + 1) / totalMoveSteps,
-              { steps: 1 }
-            );
-            if (ms % 8 === 0) {
-              const snap = await takeScreenshot(page);
-              send({ type: "screenshot", screenshot: snap, step });
-            }
-          }
-          await page.mouse.move(target.x, target.y, { steps: 1 });
+          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
+          cursorX = target.x;
+          cursorY = target.y;
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
           await navigationPromise;
@@ -385,23 +375,20 @@ export async function runAgentLoop(
         const target = mapping[action.targetNumber];
         if (target) {
           send({ type: "status", message: `Step ${step}: Typing into element #${action.targetNumber}...` });
-          try {
-            await page.evaluate(({x, y}) => {
-              const c = document.getElementById("som-ghost-cursor");
-              if (c) c.style.transform = `translate(${x}px, ${y}px)`;
-            }, { x: target.x, y: target.y });
-          } catch {}
-          await page.mouse.move(target.x, target.y, { steps: 25 });
+          await moveCursorFluidly(page, cursorX, cursorY, target.x, target.y, send, step);
+          cursorX = target.x;
+          cursorY = target.y;
           await page.mouse.click(target.x, target.y);
-          await page.waitForTimeout(300);
+          await page.waitForTimeout(500);
           const text = action.textToType;
           for (let i = 0; i < text.length; i++) {
-            await page.keyboard.type(text[i], { delay: 100 });
-            if (i % 3 === 0 || i === text.length - 1) {
+            await page.keyboard.type(text[i], { delay: 180 });
+            if (i % 2 === 0 || i === text.length - 1) {
               const snap = await takeScreenshot(page);
               send({ type: "screenshot", screenshot: snap, step });
             }
           }
+          await new Promise(r => setTimeout(r, 1000));
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.keyboard.press("Enter");
           await navigationPromise;
@@ -416,7 +403,7 @@ export async function runAgentLoop(
         previousActions.push("Scrolled down the page");
       }
 
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2000));
 
       if (step === MAX_STEPS) {
         send({ type: "status", message: "Reached maximum steps." });
@@ -427,9 +414,9 @@ export async function runAgentLoop(
     log(`Agent error: ${err.message}`, "agent");
     send({ type: "error", message: err.message });
   } finally {
-    if (page) {
+    if (localBrowser) {
       try {
-        await page.context().close();
+        await localBrowser.close();
       } catch {}
     }
   }

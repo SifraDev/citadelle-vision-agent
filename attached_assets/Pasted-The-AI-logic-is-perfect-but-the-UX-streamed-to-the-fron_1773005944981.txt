@@ -1,0 +1,64 @@
+The AI logic is perfect, but the UX streamed to the frontend is terrible. It looks like "jumping magic" instead of a human. We must slow down Playwright and guarantee intermediate screenshot delivery over the WebSocket to make it look smooth for the judges. Also, the agent crashes with "Browser context closed" on a second run, which is unacceptable for a demo.
+
+Please update agent.ts with these precise visual and stability resilience fixes:
+
+1. Fix "The Frozen Cursor" & Add Fluidity (No native CSS transitions):
+Do not use transition: transform in CSS for the ghost cursor; it doesn't work well with screenshots. We will use JavaScript-driven movement with frames.
+Inside the injectMarkers injection logic, add a function moveCursorFluidly(page, targetX, targetY):
+
+TypeScript
+async function moveCursorFluidly(page: Page, targetX: number, targetY: number) {
+  const currentX = // Get current cursor position from DOM style (need to track this in agent loop state);
+  const currentY = // Get current cursor position;
+  const totalSteps = 80; // Slow it down a lot
+  for (let i = 0; i < totalSteps; i++) {
+    const nextX = currentX + (targetX - currentX) * (i / totalSteps);
+    const nextY = currentY + (targetY - currentY) * (i / totalSteps);
+    await page.evaluate(({x, y}) => {
+      const c = document.getElementById("som-ghost-cursor");
+      if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+    }, {x: nextX, y: nextY});
+    if (i % 6 === 0 || i === totalSteps - 1) { // Take ~13 frames during move
+      const snap = await takeScreenshot(page);
+      send({ type: "screenshot", screenshot: snap, step: currentStepInLoop });
+    }
+  }
+}
+Use this function BEFORE every click and type action in the main loop. Update page.mouse.move(..., { steps: 25 }) to use moveCursorFluidly.
+
+2. Fix "No Teclea" - Visible Slow Typing:
+Update the action === "type" execution block. Instead of instant typing, slow it down massively and stream frames while it types.
+
+TypeScript
+// type action block
+await moveCursorFluidly(page, targetX, targetY); // Glide cursor first
+await page.mouse.click(targetX, targetY);
+await page.waitForTimeout(500); // Wait for input focus
+const text = action.textToType;
+for (let i = 0; i < text.length; i++) {
+await page.keyboard.type(text[i], { delay: 180 }); // VERY slow typing for video
+if (i % 2 === 0 || i === text.length - 1) { // Stream frame every 2 chars
+const snap = await takeScreenshot(page);
+send({ type: "screenshot", screenshot: snap, step });
+}
+}
+// Wait a second so the user sees the completed text BEFORE Enter is pressed
+await new Promise(r => setTimeout(r, 1000));
+
+
+**3. Fix "Browser context is closed" Crash:**
+Replit Nix environments can kill browser contexts between runs if a singleton browser connection is dropped. To guarantee stability for a 4-minute demo video, **DO NOT use the `browser` singleton pattern in `getBrowser`**. For now, launch a clean browser *inside* `runAgentLoop` and close it at the very end.
+TypeScript
+// Inside runAgentLoop:
+const b = await chromium.launch({ executablePath: findChromium(), headless: true, args: [ ... ] });
+try {
+  // all loop logic
+} finally {
+  await b.close(); // Close EVERYTHING cleanly on stop or DONE.
+}
+This ensures a fresh, stable browser environment every time the user clicks "Run" on the frontend, preventing the Browser context is closed error.
+
+4. Post-Action Wait:
+Increase the setTimeout after actions (click/type + enter) to await new Promise(r => setTimeout(r, 2000));.
+
+Apply these stability and visual upgrades. The user needs to see the cursor glide to the box, and letters appear one by one.
