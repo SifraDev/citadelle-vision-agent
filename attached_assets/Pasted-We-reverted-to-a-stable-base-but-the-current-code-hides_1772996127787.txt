@@ -1,0 +1,36 @@
+We reverted to a stable base, but the current code hides API errors (like 429 Rate Limits) behind generic "parse errors", and it retries instantly, which makes rate limits worse. Also, we need the "movie magic" cursor/typing animations exclusively for the frontend.
+
+Please update agent.ts with these 3 precise fixes:
+
+1. Expose Real API Errors & Smart Backoff:
+In runAgentLoop, inside the try...catch for askGemini, log the ACTUAL error message from parseErr.message. Add a 3-second delay before retrying so we don't hammer the API if we hit a rate limit.
+
+TypeScript
+} catch (parseErr: any) {
+  retries++;
+  send({ type: "log", message: `AI error: ${parseErr.message}. Retrying (${retries}/${MAX_RETRIES})...` });
+  await new Promise(r => setTimeout(r, 3000)); // Smart backoff
+  // ...
+2. Bulletproof JSON Parsing:
+In askGemini, Gemini sometimes wraps the JSON in markdown or reasoning text. Extract the JSON block reliably:
+
+TypeScript
+const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+if (!jsonMatch) throw new Error("No JSON found in response: " + rawText.slice(0, 100));
+const parsed = JSON.parse(jsonMatch[0]);
+3. Frontend-Only Streaming (The Movie Magic):
+We want the user to see the typing happen character-by-character, BUT WE MUST NOT send these intermediate screenshots to Gemini.
+Update the action === "type" execution block:
+After clicking the input field, type the text character-by-character. Every 2 or 3 characters, take a screenshot and send it ONLY to the frontend via send({ type: "screenshot", screenshot: snap, step }).
+
+TypeScript
+// Example logic for the type action block:
+const text = action.textToType;
+for (let i = 0; i < text.length; i++) {
+  await page.keyboard.type(text[i], { delay: 100 });
+  if (i % 3 === 0 || i === text.length - 1) { // Stream to UI
+    const snap = await takeScreenshot(page);
+    send({ type: "screenshot", screenshot: snap, step });
+  }
+}
+Implement a similar approach if possible to show intermediate frames during the cursor movement to the target.

@@ -195,13 +195,13 @@ Rules:
   const rawText = response.text || "";
   log(`Gemini raw response: ${rawText}`, "agent");
 
-  const cleaned = rawText
-    .replace(/```json\s*/g, "")
-    .replace(/```\s*/g, "")
-    .trim();
+  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("No JSON found in response: " + rawText.slice(0, 100));
+  }
 
   try {
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(jsonMatch[0]);
     return {
       action: parsed.action || "done",
       targetNumber: parsed.targetNumber,
@@ -209,8 +209,8 @@ Rules:
       reasoning: parsed.reasoning,
     };
   } catch {
-    log(`Failed to parse Gemini response: ${cleaned}`, "agent");
-    throw new Error(`Failed to parse AI response: ${cleaned.slice(0, 200)}`);
+    log(`Failed to parse Gemini response: ${jsonMatch[0]}`, "agent");
+    throw new Error(`Failed to parse AI response: ${jsonMatch[0].slice(0, 200)}`);
   }
 }
 
@@ -314,12 +314,13 @@ export async function runAgentLoop(
           break;
         } catch (parseErr: any) {
           retries++;
+          send({ type: "log", message: `AI error: ${parseErr.message}. Retrying (${retries}/${MAX_RETRIES})...` });
           if (retries > MAX_RETRIES) {
             send({ type: "log", message: `Failed to get valid AI response after ${MAX_RETRIES} retries` });
             send({ type: "error", message: "AI returned invalid responses. Stopping." });
             return;
           }
-          send({ type: "log", message: `AI response parse error, retrying (${retries}/${MAX_RETRIES})...` });
+          await new Promise(r => setTimeout(r, 3000));
         }
       }
 
@@ -359,7 +360,19 @@ export async function runAgentLoop(
               if (c) c.style.transform = `translate(${x}px, ${y}px)`;
             }, { x: target.x, y: target.y });
           } catch {}
-          await page.mouse.move(target.x, target.y, { steps: 25 });
+          const totalMoveSteps = 25;
+          for (let ms = 0; ms < totalMoveSteps; ms++) {
+            await page.mouse.move(
+              target.x * (ms + 1) / totalMoveSteps,
+              target.y * (ms + 1) / totalMoveSteps,
+              { steps: 1 }
+            );
+            if (ms % 8 === 0) {
+              const snap = await takeScreenshot(page);
+              send({ type: "screenshot", screenshot: snap, step });
+            }
+          }
+          await page.mouse.move(target.x, target.y, { steps: 1 });
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.mouse.click(target.x, target.y);
           await navigationPromise;
@@ -381,7 +394,14 @@ export async function runAgentLoop(
           await page.mouse.move(target.x, target.y, { steps: 25 });
           await page.mouse.click(target.x, target.y);
           await page.waitForTimeout(300);
-          await page.keyboard.type(action.textToType, { delay: 50 });
+          const text = action.textToType;
+          for (let i = 0; i < text.length; i++) {
+            await page.keyboard.type(text[i], { delay: 100 });
+            if (i % 3 === 0 || i === text.length - 1) {
+              const snap = await takeScreenshot(page);
+              send({ type: "screenshot", screenshot: snap, step });
+            }
+          }
           const navigationPromise = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
           await page.keyboard.press("Enter");
           await navigationPromise;
