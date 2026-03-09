@@ -25,7 +25,7 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 4. Screenshot is taken and sent to Gemini 2.5 Flash with the goal
 5. AI returns a JSON action (click/type/scroll/extract/done)
 6. Action is executed on the page, markers removed
-   - `extract` action triggers multi-agent pipeline: Harvester finds PDF (via download links, embeds, iframes) and downloads it; Lawyer agent sends the PDF natively to Gemini (application/pdf inline data) for deep legal analysis; falls back to DOM text if no PDF found; result sent as structured JSON report
+   - `extract` action triggers multi-agent pipeline: Harvester reads PDF href from `<a>` tags without clicking (avoids page navigation side effects), downloads PDF using browser cookies (`page.context().cookies()`) with fallback chain: `page.request.get` → native `fetch` with cookies/headers → `page.goto` with auto-goBack; Lawyer agent sends the PDF natively to Gemini (application/pdf inline data) for deep legal analysis; falls back to DOM text if no PDF found; result sent as structured JSON report
 7. Loop repeats until done or max steps (15 normal, 25 for precedent research)
 8. All screenshots and logs stream to the frontend via WebSocket
 
@@ -33,6 +33,8 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 
 - Activated when the user's goal matches `/precedent|cited|authorities|citing cases|case history|and its precedents|with precedents/i`
 - Agent extracts the primary case, then navigates to cited precedents and extracts those too (up to 4 total cases)
+- Duplicate extract prevention: `extractedUrls` Set tracks pages already extracted; skips and injects navigation guidance into previousActions
+- Anti-loop rule covers both repeated clicks and repeated extracts on the same page
 - `collectedReports[]` accumulates Lawyer outputs across multiple extract cycles; merged into a single JSON array at the end
 - Visual agent prompt includes a PRECEDENT RESEARCH RULE instructing it to navigate to "Authorities"/"Cited by" tabs
 - Frontend labels cards as "Primary Case" / "Precedent 1" / "Precedent 2" etc. with colored badges
