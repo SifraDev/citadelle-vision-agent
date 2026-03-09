@@ -174,6 +174,7 @@ Rules:
 - Use "type" to click a numbered input field and type text into it. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
 - Use "scroll" to scroll down the page (no targetNumber needed)
 - UNIVERSAL EXTRACT RULE: Your only job as the navigator is to reach the final page containing the requested case, article, video, or document. The MOMENT you are on the correct target page, you MUST IMMEDIATELY use the "extract" action and stop navigating. DO NOT try to read the document yourself, and DO NOT try to click into specific PDF viewers or sub-tabs unless strictly necessary to reveal the page. Just get to the main page of the document/video and trigger "extract". Our universal backend will automatically detect if there is a PDF to download, a video to transcribe, or text to scrape, and will perform the deep analysis.
+- PRECEDENT RESEARCH RULE: When the user's goal asks for precedents, cited cases, case history, or authorities: after you trigger "extract" on the main case, DO NOT use "done". Instead, navigate to the "Authorities", "Cited by", or "References" section/tab on the case page and click on the most relevant cited cases. Trigger "extract" on each precedent case you visit. The backend will collect all extractions and merge them into a final multi-case report. Continue navigating and extracting until you have covered 3-4 cases total.
 - EXCEPTION FOR LISTS: If the user's goal explicitly asks for a LIST or MULTIPLE items (e.g., "5 lawsuits", "latest cases", "recent articles"), you ARE ALLOWED to use the "extract" action directly on the search results page without clicking into individual items.
 - WRONG PAGE RULE: If you realize you are on the WRONG page, DO NOT use "extract". Use "click" to go back or "type" to search again. "extract" is ONLY for the correct target page.
 - EXTRACTION FORMAT: When using "extract", structure the extractedData as a JSON array: [{"title": "Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Summary text"}]. Always return valid JSON array syntax.
@@ -310,8 +311,17 @@ export async function runAgentLoop(
 
     await ensureGhostCursor(page);
 
-    const MAX_STEPS = 15;
+    const isPrecedentGoal = /precedent|cited|authorities|citing cases|case history|and its precedents|with precedents/i.test(goal);
+    const MAX_STEPS = isPrecedentGoal ? 25 : 15;
+    const collectedReports: string[] = [];
+    const MAX_EXTRACTS = isPrecedentGoal ? 4 : 1;
+    let extractCount = 0;
     const previousActions: string[] = [];
+
+    if (isPrecedentGoal) {
+      log(`Precedent research mode: will collect up to ${MAX_EXTRACTS} cases over ${MAX_STEPS} steps.`, "agent");
+      send({ type: "log", message: "Precedent research mode activated — will collect multiple cases." });
+    }
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       if (shouldStop()) {
@@ -555,6 +565,53 @@ export async function runAgentLoop(
 
         if (shouldStop()) break;
 
+        extractCount++;
+        if (isPrecedentGoal && extractCount < MAX_EXTRACTS) {
+          collectedReports.push(lawyerOutput);
+          log(`Precedent research: extracted case ${extractCount} of ${MAX_EXTRACTS}. Continuing to find more.`, "agent");
+          send({ type: "status", message: `Extracted case ${extractCount} of ${MAX_EXTRACTS}. Navigating to next precedent...` });
+          send({ type: "log", message: `Case ${extractCount} extracted. Looking for precedents...` });
+          if (step >= MAX_STEPS) {
+            let mergedCases: any[] = [];
+            for (const report of collectedReports) {
+              try {
+                const cleaned = report.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+                const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+                if (arrMatch) {
+                  const parsed = JSON.parse(arrMatch[0]);
+                  if (Array.isArray(parsed)) mergedCases.push(...parsed);
+                }
+              } catch {}
+            }
+            send({ type: "report", message: JSON.stringify(mergedCases) });
+            log(`Precedent research: max steps reached after ${mergedCases.length} cases.`, "agent");
+            send({ type: "done", message: "Precedent research complete (max steps reached)." });
+            break;
+          }
+          continue;
+        }
+
+        if (isPrecedentGoal && collectedReports.length > 0) {
+          collectedReports.push(lawyerOutput);
+          let mergedCases: any[] = [];
+          for (const report of collectedReports) {
+            try {
+              const cleaned = report.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+              const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+              if (arrMatch) {
+                const parsed = JSON.parse(arrMatch[0]);
+                if (Array.isArray(parsed)) mergedCases.push(...parsed);
+              }
+            } catch {}
+          }
+          const finalReport = JSON.stringify(mergedCases);
+          send({ type: "report", message: finalReport });
+          log(`Precedent research complete: ${mergedCases.length} cases collected.`, "agent");
+          send({ type: "log", message: `Precedent research complete — ${mergedCases.length} cases in report.` });
+          send({ type: "done", message: "Precedent research complete." });
+          break;
+        }
+
         send({ type: "report", message: lawyerOutput });
         log(`Extract action completed. Data extracted successfully.`, "agent");
         send({ type: "log", message: "Data extracted successfully." });
@@ -564,6 +621,25 @@ export async function runAgentLoop(
 
       if (action.action === "done") {
         await removeMarkers(page);
+
+        if (isPrecedentGoal && collectedReports.length > 0) {
+          let mergedCases: any[] = [];
+          for (const report of collectedReports) {
+            try {
+              const cleaned = report.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+              const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+              if (arrMatch) {
+                const parsed = JSON.parse(arrMatch[0]);
+                if (Array.isArray(parsed)) mergedCases.push(...parsed);
+              }
+            } catch {}
+          }
+          send({ type: "report", message: JSON.stringify(mergedCases) });
+          log(`Precedent research: agent signaled done with ${mergedCases.length} collected cases.`, "agent");
+          send({ type: "done", message: "Precedent research complete." });
+          break;
+        }
+
         send({ type: "status", message: "Goal accomplished!" });
         send({ type: "log", message: "Agent completed the task." });
 
@@ -624,8 +700,25 @@ export async function runAgentLoop(
       await new Promise(r => setTimeout(r, 2000));
 
       if (step === MAX_STEPS) {
-        send({ type: "status", message: "Reached maximum steps." });
-        send({ type: "done", message: "Maximum steps reached." });
+        if (isPrecedentGoal && collectedReports.length > 0) {
+          let mergedCases: any[] = [];
+          for (const report of collectedReports) {
+            try {
+              const cleaned = report.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+              const arrMatch = cleaned.match(/\[[\s\S]*\]/);
+              if (arrMatch) {
+                const parsed = JSON.parse(arrMatch[0]);
+                if (Array.isArray(parsed)) mergedCases.push(...parsed);
+              }
+            } catch {}
+          }
+          send({ type: "report", message: JSON.stringify(mergedCases) });
+          log(`Precedent research: max steps reached. Delivering ${mergedCases.length} collected cases.`, "agent");
+          send({ type: "done", message: "Precedent research complete (max steps reached)." });
+        } else {
+          send({ type: "status", message: "Reached maximum steps." });
+          send({ type: "done", message: "Maximum steps reached." });
+        }
       }
     }
   } catch (err: any) {
