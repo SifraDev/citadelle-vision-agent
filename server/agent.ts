@@ -394,32 +394,68 @@ export async function runAgentLoop(
 
         if (shouldStop()) break;
 
-        send({ type: "status", message: "Harvesting full document text..." });
-        log(`Harvester: extracting full DOM text from page.`, "agent");
-        let fullText = "";
+        send({ type: "status", message: "Searching for PDF document..." });
+        log(`Harvester: looking for embedded PDF on page.`, "agent");
+
+        let pdfBuffer: Buffer | null = null;
         try {
-          fullText = await page.evaluate(() => document.body.innerText);
+          const pdfUrl = await page.evaluate(() => {
+            const dlLink = document.querySelector('a[href*=".pdf"]') as HTMLAnchorElement | null;
+            if (dlLink) return dlLink.href;
+
+            const embed = document.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]') as HTMLEmbedElement | null;
+            if (embed?.src) return embed.src;
+
+            const iframe = document.querySelector('iframe[src*=".pdf"]') as HTMLIFrameElement | null;
+            if (iframe?.src) return iframe.src;
+
+            const obj = document.querySelector('object[data*=".pdf"]') as HTMLObjectElement | null;
+            if (obj?.data) return obj.data;
+
+            const anyPdfLink = document.querySelector('a[href*="pdf"], a[href*="PDF"]') as HTMLAnchorElement | null;
+            if (anyPdfLink) return anyPdfLink.href;
+
+            return null;
+          });
+
+          if (pdfUrl) {
+            log(`Harvester: found PDF URL: ${pdfUrl}`, "agent");
+            send({ type: "status", message: "Downloading PDF document..." });
+
+            const response = await page.request.get(pdfUrl);
+            const body = await response.body();
+            if (body && body.length > 500) {
+              pdfBuffer = body;
+              log(`Harvester: downloaded PDF (${(body.length / 1024).toFixed(1)} KB).`, "agent");
+            } else {
+              log(`Harvester: PDF response too small (${body?.length || 0} bytes).`, "agent");
+            }
+          } else {
+            log(`Harvester: no PDF link/embed found on page.`, "agent");
+          }
         } catch (e: any) {
-          log(`Harvester failed to get DOM text: ${e.message}. Falling back to vision extract.`, "agent");
+          log(`Harvester: PDF extraction failed: ${e.message}`, "agent");
         }
 
         if (shouldStop()) break;
 
         let lawyerOutput = action.extractedData || "";
-        if (fullText && fullText.length > 100) {
-          const cleanedText = fullText
-            .replace(/\t/g, " ")
-            .replace(/\n{3,}/g, "\n\n")
-            .replace(/ {2,}/g, " ")
-            .trim();
 
-          send({ type: "status", message: "Legal analyst reviewing document..." });
-          log(`Lawyer: sending ${cleanedText.length} chars to Gemini for deep analysis.`, "agent");
+        if (pdfBuffer) {
+          send({ type: "status", message: "Legal analyst reading PDF document..." });
+          log(`Lawyer: sending PDF (${(pdfBuffer.length / 1024).toFixed(1)} KB) to Gemini for analysis.`, "agent");
           try {
-            const lawyerPrompt = `You are an elite legal analyst. The user's goal is: "${goal}". Read this raw webpage text. If the user asked for a summary, write a 3-paragraph professional legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array in this exact format, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects in the array.\n\nWebpage text:\n${cleanedText.slice(0, 30000)}`;
+            const pdfBase64 = pdfBuffer.toString("base64");
+            const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this provided PDF court document. If the user asked for a summary, write a highly professional, comprehensive 3-paragraph legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects in the array.`;
             const lawyerResponse = await ai.models.generateContent({
               model: "gemini-2.5-flash-preview-05-20",
-              contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
+              contents: [{
+                role: "user",
+                parts: [
+                  { inlineData: { data: pdfBase64, mimeType: "application/pdf" } },
+                  { text: lawyerPrompt },
+                ],
+              }],
             });
             let lawyerText = lawyerResponse.text?.trim() || "";
             lawyerText = lawyerText
@@ -428,15 +464,39 @@ export async function runAgentLoop(
               .trim();
             if (lawyerText.length > 50 && lawyerText.includes("[")) {
               lawyerOutput = lawyerText;
-              log(`Lawyer: produced ${lawyerText.length} char analysis.`, "agent");
+              log(`Lawyer: produced ${lawyerText.length} char PDF analysis.`, "agent");
             } else {
-              log(`Lawyer: response did not contain valid JSON array, using vision extract fallback.`, "agent");
+              log(`Lawyer: PDF response invalid, using vision extract fallback.`, "agent");
             }
           } catch (e: any) {
-            log(`Lawyer agent failed: ${e.message}. Using vision extract fallback.`, "agent");
+            log(`Lawyer PDF analysis failed: ${e.message}. Using vision extract fallback.`, "agent");
           }
         } else {
-          log(`Harvester: DOM text too short (${fullText.length} chars), using vision extract.`, "agent");
+          send({ type: "status", message: "No PDF found. Analyzing page text..." });
+          log(`Harvester: no PDF available, falling back to DOM text extraction.`, "agent");
+          try {
+            let fullText = await page.evaluate(() => document.body.innerText);
+            fullText = fullText.replace(/\t/g, " ").replace(/\n{3,}/g, "\n\n").replace(/ {2,}/g, " ").trim();
+            if (fullText.length > 200) {
+              log(`Lawyer: sending ${fullText.length} chars of page text to Gemini.`, "agent");
+              const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this webpage text. Write a highly professional, comprehensive 3-paragraph legal summary (Background, Core Issues, Verdict/Precedents). Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
+              const lawyerResponse = await ai.models.generateContent({
+                model: "gemini-2.5-flash-preview-05-20",
+                contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
+              });
+              let lawyerText = lawyerResponse.text?.trim() || "";
+              lawyerText = lawyerText
+                .replace(/^```(?:json)?\s*/i, "")
+                .replace(/\s*```\s*$/, "")
+                .trim();
+              if (lawyerText.length > 50 && lawyerText.includes("[")) {
+                lawyerOutput = lawyerText;
+                log(`Lawyer: produced ${lawyerText.length} char text analysis.`, "agent");
+              }
+            }
+          } catch (e: any) {
+            log(`DOM text fallback failed: ${e.message}`, "agent");
+          }
         }
 
         if (shouldStop()) break;

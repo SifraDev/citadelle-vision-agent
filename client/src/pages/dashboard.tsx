@@ -398,7 +398,7 @@ export default function Dashboard() {
   const hardStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SILENCE_THRESHOLD = 25;
-  const SILENCE_DURATION_MS = 1500;
+  const SILENCE_DURATION_MS = 3000;
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
