@@ -167,12 +167,13 @@ Look at the provided screenshot. Interactable elements have numbered red boundin
 Decide the next logical action to accomplish the user's goal.
 
 Return ONLY a JSON object with NO markdown formatting, code fences, or extra text:
-{"action": "click" | "type" | "scroll" | "done", "targetNumber": integer, "textToType": "string (only if typing)", "reasoning": "brief explanation"}
+{"action": "click" | "type" | "scroll" | "extract" | "done", "targetNumber": integer, "textToType": "string (only if typing)", "extractedData": "string (markdown summary of the case/data)", "reasoning": "brief explanation"}
 
 Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it
 - Use "scroll" to scroll down the page (no targetNumber needed)
+- Use "extract" ONLY when you are inside the target legal case/document and can read the details. Summarize the findings into "extractedData"
 - Use "done" when the goal appears to be accomplished
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical`;
@@ -209,6 +210,7 @@ Rules:
       action: parsed.action || "done",
       targetNumber: parsed.targetNumber,
       textToType: parsed.textToType,
+      extractedData: parsed.extractedData,
       reasoning: parsed.reasoning,
     };
   } catch {
@@ -340,6 +342,15 @@ export async function runAgentLoop(
         type: "log",
         message: `AI decided: ${action.action}${action.targetNumber ? ` on element #${action.targetNumber}` : ""}${action.textToType ? ` with text "${action.textToType}"` : ""} — ${action.reasoning || ""}`,
       });
+
+      if (action.action === "extract") {
+        send({ type: "report", message: action.extractedData });
+        await removeMarkers(page);
+        log(`Extract action completed. Data extracted successfully.`, "agent");
+        send({ type: "log", message: "Data extracted successfully." });
+        send({ type: "done", message: "Extraction complete." });
+        break;
+      }
 
       if (action.action === "done") {
         await removeMarkers(page);

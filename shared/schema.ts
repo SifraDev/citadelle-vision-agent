@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 export const agentActionSchema = z.object({
-  action: z.enum(["click", "type", "scroll", "done"]),
+  action: z.enum(["click", "type", "scroll", "extract", "done"]),
   targetNumber: z.number().optional(),
   textToType: z.string().optional(),
+  extractedData: z.string().optional(),
   reasoning: z.string().optional(),
 });
 
@@ -20,7 +21,7 @@ export interface WsMessageToServer {
 }
 
 export interface WsMessageToClient {
-  type: "screenshot" | "action" | "status" | "error" | "done" | "log";
+  type: "screenshot" | "action" | "status" | "error" | "done" | "log" | "report";
   screenshot?: string;
   action?: AgentAction;
   message?: string;
