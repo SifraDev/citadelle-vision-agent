@@ -98,14 +98,12 @@ export function useAgentWebSocket() {
           case "report":
             setReportData(msg.message || null);
             addLog("status", "Legal brief generated.");
+            speakMessage("Investigation complete. The legal brief is ready.");
             break;
           case "done":
             setAgentState("done");
             setStatus(msg.message || "Done");
             addLog("status", msg.message || "Task completed");
-            if (msg.message && msg.message.includes("Extraction complete")) {
-              speakMessage("Investigation complete. The legal brief is ready.");
-            }
             break;
           case "log":
             addLog("log", msg.message || "");

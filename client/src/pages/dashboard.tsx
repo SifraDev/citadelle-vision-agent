@@ -75,7 +75,7 @@ function ActionBadge({ message }: { message: string }) {
   return null;
 }
 
-function LegalBriefCard({ markdown }: { markdown: string }) {
+function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () => void }) {
   const downloadTxt = useCallback(() => {
     const blob = new Blob([markdown], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -139,48 +139,65 @@ function LegalBriefCard({ markdown }: { markdown: string }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-6 overflow-auto" data-testid="legal-brief-view">
-      <div className="max-w-3xl mx-auto w-full">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-sky-500/10 border border-sky-500/20">
+    <div className="flex flex-col h-full bg-gradient-to-b from-slate-950 via-[#0c1222] to-slate-950 overflow-auto" data-testid="legal-brief-view">
+      <div className="border-b border-slate-800/60 bg-slate-900/40 backdrop-blur-sm px-6 py-4">
+        <div className="max-w-3xl mx-auto flex items-center gap-3">
+          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500/20 to-indigo-500/20 border border-sky-500/20 shadow-lg shadow-sky-500/5">
             <Shield className="w-5 h-5 text-sky-400" />
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-lg font-bold text-white tracking-tight">Citadelle Legal Brief</h2>
-            <p className="text-xs text-slate-400">Automated Intelligence Report</p>
+            <p className="text-xs text-slate-500">Automated Intelligence Report</p>
           </div>
-          <Badge className="ml-auto bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
+          <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
             <CheckCircle2 className="w-3 h-3 mr-1" />
             Complete
           </Badge>
         </div>
+      </div>
 
-        <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm p-6 mb-4 shadow-2xl shadow-sky-500/5">
-          <div className="prose prose-invert max-w-none">
-            {renderMarkdown(markdown)}
-          </div>
-        </Card>
+      <div className="flex-1 overflow-auto px-6 py-6">
+        <div className="max-w-3xl mx-auto">
+          <Card className="bg-slate-800/30 border-slate-700/40 backdrop-blur-sm p-8 shadow-2xl shadow-sky-500/5 rounded-xl">
+            <div className="prose prose-invert max-w-none">
+              {renderMarkdown(markdown)}
+            </div>
+          </Card>
+        </div>
+      </div>
 
-        <div className="flex items-center gap-3">
+      <div className="border-t border-slate-800/60 bg-slate-900/40 backdrop-blur-sm px-6 py-4">
+        <div className="max-w-3xl mx-auto flex items-center gap-3">
           <Button
             data-testid="button-download-txt"
             variant="outline"
             size="sm"
             onClick={downloadTxt}
-            className="gap-2 bg-slate-800/50 border-slate-600/50 hover:bg-slate-700/50 text-slate-200"
+            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
           >
             <FileText className="w-4 h-4 text-sky-400" />
-            Download Legal Brief (.txt)
+            <span>Download Legal Brief (.txt)</span>
           </Button>
           <Button
             data-testid="button-download-csv"
             variant="outline"
             size="sm"
             onClick={downloadCsv}
-            className="gap-2 bg-slate-800/50 border-slate-600/50 hover:bg-slate-700/50 text-slate-200"
+            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
           >
             <Download className="w-4 h-4 text-sky-400" />
-            Download Case Data (.csv)
+            <span>Download Case Data (.csv)</span>
+          </Button>
+          <div className="flex-1" />
+          <Button
+            data-testid="button-close-brief"
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-300 text-slate-400 transition-all"
+          >
+            <Square className="w-3.5 h-3.5" />
+            Close Brief
           </Button>
         </div>
       </div>
@@ -463,19 +480,7 @@ export default function Dashboard() {
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 relative overflow-hidden bg-neutral-950">
             {showBrief ? (
-              <div className="flex flex-col h-full">
-                <LegalBriefCard markdown={reportData} />
-                <div className="flex justify-center py-4 bg-slate-950 border-t border-slate-800">
-                  <button
-                    data-testid="button-new-mission-brief"
-                    onClick={resetSession}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-sky-500/10 border border-sky-500/30 hover:bg-sky-500/20 hover:border-sky-400 transition-all text-sky-400 text-sm font-medium"
-                  >
-                    <Mic className="w-4 h-4" />
-                    New Mission
-                  </button>
-                </div>
-              </div>
+              <LegalBriefCard markdown={reportData} onClose={resetSession} />
             ) : screenshot ? (
               <div className="relative w-full h-full">
                 <img
