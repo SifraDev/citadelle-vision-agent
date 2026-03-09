@@ -25,7 +25,7 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 4. Screenshot is taken and sent to Gemini 2.5 Flash with the goal
 5. AI returns a JSON action (click/type/scroll/extract/done)
 6. Action is executed on the page, markers removed
-   - `extract` action sends extracted data as a "report" WebSocket message and ends the session
+   - `extract` action triggers multi-agent pipeline: Harvester scrapes full DOM text via `page.evaluate()`, Lawyer agent (separate Gemini text call) produces deep legal analysis, result sent as structured JSON report
 7. Loop repeats until done or max steps (15)
 8. All screenshots and logs stream to the frontend via WebSocket
 
@@ -37,7 +37,7 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 - **Open Full Report**: Opens a print-ready HTML report in a new browser tab with the same premium styling. Users can Print → Save as PDF for perfectly formatted documents
 - **Downloads**: `.docx` export via `docx` library with structured headings and metadata for Google Docs/Word compatibility
 - **Text-to-Speech**: Premium voice selection — searches for Google/Samantha/Daniel/Premium/Natural voices via `speechSynthesis.getVoices()`, with professional pitch (1.0) and rate (1.05). Fires immediately on report delivery
-- **Voice Activity Detection (VAD)**: AudioContext + AnalyserNode monitors microphone volume in real-time. Auto-stops recording after 1.5s of silence once speech is detected. Shows reactive volume pulse and auto-submit indicator
+- **Voice Activity Detection (VAD)**: AudioContext + AnalyserNode monitors microphone volume in real-time. Auto-stops recording after 2.5s of silence once speech is detected. Hard-stop timer at 8s prevents infinite recording. Shows reactive volume pulse and auto-submit indicator
 - **Session Reset**: "New Mission" button appears after run completion to clear state and return to mic view
 
 ## Environment Variables

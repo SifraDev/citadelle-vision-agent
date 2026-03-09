@@ -391,7 +391,48 @@ export async function runAgentLoop(
         await removeMarkers(page);
         const cleanScreenshot = await takeScreenshot(page);
         send({ type: "screenshot", screenshot: cleanScreenshot, step });
-        send({ type: "report", message: action.extractedData });
+
+        if (shouldStop()) break;
+
+        send({ type: "status", message: "Harvesting full document text..." });
+        log(`Harvester: extracting full DOM text from page.`, "agent");
+        let fullText = "";
+        try {
+          fullText = await page.evaluate(() => document.body.innerText);
+        } catch (e: any) {
+          log(`Harvester failed to get DOM text: ${e.message}. Falling back to vision extract.`, "agent");
+        }
+
+        if (shouldStop()) break;
+
+        let lawyerOutput = action.extractedData || "";
+        if (fullText && fullText.length > 100) {
+          send({ type: "status", message: "Legal analyst reviewing document..." });
+          log(`Lawyer: sending ${fullText.length} chars to Gemini for deep analysis.`, "agent");
+          try {
+            const lawyerPrompt = `You are an elite legal analyst. The user's goal is: "${goal}". Read the following raw extracted webpage text. If the user asked for a summary, write a highly professional, comprehensive 3-paragraph legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. Ignore UI menus and ads. Return ONLY a valid JSON array (no markdown, no code fences) in this format: [{"title": "Case Name", "court": "Court Name", "date": "Date", "docket": "Docket Number", "content": "Your detailed analysis here"}]. For list requests, return multiple objects in the array. Extract real case metadata (title, court, date, docket) from the text.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
+            const lawyerResponse = await ai.models.generateContent({
+              model: "gemini-2.5-flash-preview-05-20",
+              contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
+            });
+            const lawyerText = lawyerResponse.text?.trim() || "";
+            if (lawyerText.length > 50) {
+              lawyerOutput = lawyerText;
+              log(`Lawyer: produced ${lawyerText.length} char analysis.`, "agent");
+            } else {
+              log(`Lawyer: response too short, using vision extract fallback.`, "agent");
+            }
+          } catch (e: any) {
+            log(`Lawyer agent failed: ${e.message}. Using vision extract fallback.`, "agent");
+          }
+        } else {
+          log(`Harvester: DOM text too short (${fullText.length} chars), using vision extract.`, "agent");
+        }
+
+        if (shouldStop()) break;
+
+        const reportPayload = lawyerOutput || `[{"title":"Extraction","court":"","date":"","docket":"","content":"${fullText.slice(0, 2000).replace(/"/g, '\\"').replace(/\n/g, ' ')}"}]`;
+        send({ type: "report", message: reportPayload });
         log(`Extract action completed. Data extracted successfully.`, "agent");
         send({ type: "log", message: "Data extracted successfully." });
         send({ type: "done", message: "Extraction complete." });

@@ -395,6 +395,7 @@ export default function Dashboard() {
   const hasSpokenRef = useRef(false);
   const stoppingRef = useRef(false);
   const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hardStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SILENCE_THRESHOLD = 25;
   const SILENCE_DURATION_MS = 2500;
@@ -438,6 +439,7 @@ export default function Dashboard() {
   const stopRecording = useCallback(() => {
     if (stoppingRef.current) return;
     stoppingRef.current = true;
+    if (hardStopRef.current) { clearTimeout(hardStopRef.current); hardStopRef.current = null; }
     cleanupAudio();
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
@@ -467,6 +469,7 @@ export default function Dashboard() {
       };
 
       recorder.onstop = () => {
+        if (hardStopRef.current) { clearTimeout(hardStopRef.current); hardStopRef.current = null; }
         if (timerRef.current) {
           clearInterval(timerRef.current);
           timerRef.current = null;
@@ -504,6 +507,17 @@ export default function Dashboard() {
       setRecordingDuration(0);
       hasSpokenRef.current = false;
       silenceStartRef.current = null;
+
+      if (hardStopRef.current) clearTimeout(hardStopRef.current);
+      hardStopRef.current = setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          stoppingRef.current = true;
+          cleanupAudio();
+          mediaRecorderRef.current.stop();
+          setIsRecording(false);
+        }
+      }, 8000);
+
 
       timerRef.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
@@ -574,10 +588,8 @@ export default function Dashboard() {
   const showBrief = !!reportData;
 
   const resetSession = useCallback(() => {
-    if (sendTimeoutRef.current) {
-      clearTimeout(sendTimeoutRef.current);
-      sendTimeoutRef.current = null;
-    }
+    if (sendTimeoutRef.current) { clearTimeout(sendTimeoutRef.current); sendTimeoutRef.current = null; }
+    if (hardStopRef.current) { clearTimeout(hardStopRef.current); hardStopRef.current = null; }
     clearSession();
     setIsRecording(false);
     setIsAutoStopping(false);
