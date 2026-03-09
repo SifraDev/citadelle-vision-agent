@@ -398,7 +398,7 @@ export default function Dashboard() {
   const hardStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SILENCE_THRESHOLD = 25;
-  const SILENCE_DURATION_MS = 2500;
+  const SILENCE_DURATION_MS = 1500;
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -508,15 +508,6 @@ export default function Dashboard() {
       hasSpokenRef.current = false;
       silenceStartRef.current = null;
 
-      if (hardStopRef.current) clearTimeout(hardStopRef.current);
-      hardStopRef.current = setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-          stoppingRef.current = true;
-          cleanupAudio();
-          mediaRecorderRef.current.stop();
-          setIsRecording(false);
-        }
-      }, 8000);
 
 
       timerRef.current = setInterval(() => {

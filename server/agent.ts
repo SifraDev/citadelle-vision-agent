@@ -407,20 +407,30 @@ export async function runAgentLoop(
 
         let lawyerOutput = action.extractedData || "";
         if (fullText && fullText.length > 100) {
+          const cleanedText = fullText
+            .replace(/\t/g, " ")
+            .replace(/\n{3,}/g, "\n\n")
+            .replace(/ {2,}/g, " ")
+            .trim();
+
           send({ type: "status", message: "Legal analyst reviewing document..." });
-          log(`Lawyer: sending ${fullText.length} chars to Gemini for deep analysis.`, "agent");
+          log(`Lawyer: sending ${cleanedText.length} chars to Gemini for deep analysis.`, "agent");
           try {
-            const lawyerPrompt = `You are an elite legal analyst. The user's goal is: "${goal}". Read the following raw extracted webpage text. If the user asked for a summary, write a highly professional, comprehensive 3-paragraph legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. Ignore UI menus and ads. Return ONLY a valid JSON array (no markdown, no code fences) in this format: [{"title": "Case Name", "court": "Court Name", "date": "Date", "docket": "Docket Number", "content": "Your detailed analysis here"}]. For list requests, return multiple objects in the array. Extract real case metadata (title, court, date, docket) from the text.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
+            const lawyerPrompt = `You are an elite legal analyst. The user's goal is: "${goal}". Read this raw webpage text. If the user asked for a summary, write a 3-paragraph professional legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array in this exact format, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects in the array.\n\nWebpage text:\n${cleanedText.slice(0, 30000)}`;
             const lawyerResponse = await ai.models.generateContent({
               model: "gemini-2.5-flash-preview-05-20",
               contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
             });
-            const lawyerText = lawyerResponse.text?.trim() || "";
-            if (lawyerText.length > 50) {
+            let lawyerText = lawyerResponse.text?.trim() || "";
+            lawyerText = lawyerText
+              .replace(/^```(?:json)?\s*/i, "")
+              .replace(/\s*```\s*$/, "")
+              .trim();
+            if (lawyerText.length > 50 && lawyerText.includes("[")) {
               lawyerOutput = lawyerText;
               log(`Lawyer: produced ${lawyerText.length} char analysis.`, "agent");
             } else {
-              log(`Lawyer: response too short, using vision extract fallback.`, "agent");
+              log(`Lawyer: response did not contain valid JSON array, using vision extract fallback.`, "agent");
             }
           } catch (e: any) {
             log(`Lawyer agent failed: ${e.message}. Using vision extract fallback.`, "agent");
@@ -431,8 +441,7 @@ export async function runAgentLoop(
 
         if (shouldStop()) break;
 
-        const reportPayload = lawyerOutput || `[{"title":"Extraction","court":"","date":"","docket":"","content":"${fullText.slice(0, 2000).replace(/"/g, '\\"').replace(/\n/g, ' ')}"}]`;
-        send({ type: "report", message: reportPayload });
+        send({ type: "report", message: lawyerOutput });
         log(`Extract action completed. Data extracted successfully.`, "agent");
         send({ type: "log", message: "Data extracted successfully." });
         send({ type: "done", message: "Extraction complete." });
