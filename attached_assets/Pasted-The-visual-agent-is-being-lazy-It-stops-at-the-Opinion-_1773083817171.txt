@@ -1,0 +1,29 @@
+The visual agent is being lazy. It stops at the "Opinion" tab and extracts the visible header because the prompt told it to extract immediately. We need to force it to click the "PDF" tab or "Download PDF" button first, and we need the Harvester to actually grab that button's link.
+
+Update server/agent.ts with these EXACT changes:
+
+1. Update the visual prompt in askGemini:
+Replace the "CRITICAL RULE FOR EXTRACT" line with this:
+"- CRITICAL RULE FOR EXTRACT: When you arrive at a case page, DO NOT use the 'extract' action immediately. You MUST explicitly use the 'click' action on the 'PDF' tab or the 'Download PDF' button first. ONLY use the 'extract' action AFTER you have navigated to the PDF view. Your goal is to get the actual PDF document."
+
+2. Hardcode the CourtListener PDF selectors in the Harvester:
+In the extract execution block, update the page.evaluate PDF finder to this exact code:
+
+TypeScript
+const pdfUrl = await page.evaluate(() => {
+  // 1. Explicitly find the "Download PDF" button text
+  const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => a.innerText.toLowerCase().includes('download pdf'));
+  if (downloadBtn && downloadBtn.href) return downloadBtn.href;
+  
+  // 2. Explicitly find the "PDF" tab
+  const pdfTab = Array.from(document.querySelectorAll('a')).find(a => a.innerText.trim().toLowerCase() === 'pdf');
+  if (pdfTab && pdfTab.href) return pdfTab.href;
+  
+  // 3. Fallbacks
+  const dlLink = document.querySelector('a[href$=".pdf"], a[href*=".pdf"]') as HTMLAnchorElement;
+  if (dlLink) return dlLink.href;
+  return null;
+});
+3. Update the Lawyer Prompt for Contradictions:
+In the gemini-1.5-pro prompt analyzing the pdfBuffer, ensure it says:
+"Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Your deep summary with important points and contradictions here"}]"

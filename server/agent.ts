@@ -173,11 +173,11 @@ Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
 - Use "scroll" to scroll down the page (no targetNumber needed)
-- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases UNLESS the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases", "last 10", "recent filings"). For single-case goals, you MUST click the link to enter the specific case document first. Only use "extract" when you are inside the actual full text of the CORRECT target document.
+- CRITICAL RULE FOR EXTRACT: When you arrive at a case page, DO NOT use the "extract" action immediately. You MUST explicitly use the "click" action on the "PDF" tab or the "Download PDF" button first. ONLY use the "extract" action AFTER you have navigated to the PDF view. Your goal is to get the actual PDF document.
 - EXCEPTION TO EXTRACT RULE: If the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases"), you ARE ALLOWED to use the "extract" action directly on the search results page. You do not need to click into individual cases for list requests. Extract all visible matching cases from the results.
 - WRONG PAGE RULE: If you realize you are on the WRONG case or page, DO NOT use the "extract" action to try and escape or summarize what you see. You must use "click" to go back, or "type" to search again. The "extract" action is ONLY for when you are looking at the correct target document that matches the user's goal.
 - CRITICAL EXTRACTION FORMAT: When using the "extract" action, DO NOT dump raw page text. You must intelligently extract the case(s) into a structured JSON array format inside the extractedData string. Use this exact format: [{"title": "Full Case Name v. Party", "court": "Court Name", "date": "Date Filed or Decided", "docket": "Docket Number if available", "content": "The FULL detailed text of the opinion, verdict, or legal document. For list requests, provide a concise summary of each case as visible on the search results page."}]. Always return valid JSON array syntax in extractedData
-- CRITICAL: If the user's goal involves extracting, summarizing, or reading a case, you are FORBIDDEN from using the "done" action. As soon as you navigate to the correct document page (e.g., the "Opinion" tab of a case), you MUST use the "extract" action immediately, even if you only see the beginning of the text on the screen. The backend will handle parsing the rest.
+- CRITICAL: If the user's goal involves extracting, summarizing, or reading a case, you are FORBIDDEN from using the "done" action. You MUST use the "extract" action after clicking the PDF tab or Download PDF button. The backend will handle parsing the PDF.
 - Use "done" ONLY when the goal does NOT involve extracting or summarizing content (e.g., the user just asked to navigate somewhere)
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical
@@ -400,26 +400,14 @@ export async function runAgentLoop(
         let pdfBuffer: Buffer | null = null;
         try {
           const pdfUrl = await page.evaluate(() => {
-            const exactPdf = document.querySelector('a[href$=".pdf"]') as HTMLAnchorElement | null;
-            if (exactPdf) return exactPdf.href;
+            const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => a.innerText.toLowerCase().includes('download pdf'));
+            if (downloadBtn && downloadBtn.href) return downloadBtn.href;
 
-            const dropdownPdf = document.querySelector('div.dropdown-menu a[href*=".pdf"]') as HTMLAnchorElement | null;
-            if (dropdownPdf) return dropdownPdf.href;
+            const pdfTab = Array.from(document.querySelectorAll('a')).find(a => a.innerText.trim().toLowerCase() === 'pdf');
+            if (pdfTab && pdfTab.href) return pdfTab.href;
 
-            const dlLink = document.querySelector('a[href*=".pdf"]') as HTMLAnchorElement | null;
+            const dlLink = document.querySelector('a[href$=".pdf"], a[href*=".pdf"]') as HTMLAnchorElement | null;
             if (dlLink) return dlLink.href;
-
-            const embed = document.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]') as HTMLEmbedElement | null;
-            if (embed?.src) return embed.src;
-
-            const iframe = document.querySelector('iframe[src*=".pdf"]') as HTMLIFrameElement | null;
-            if (iframe?.src) return iframe.src;
-
-            const obj = document.querySelector('object[data*=".pdf"]') as HTMLObjectElement | null;
-            if (obj?.data) return obj.data;
-
-            const anyPdfLink = document.querySelector('a[href*="pdf"], a[href*="PDF"]') as HTMLAnchorElement | null;
-            if (anyPdfLink) return anyPdfLink.href;
 
             return null;
           });
@@ -452,7 +440,7 @@ export async function runAgentLoop(
           log(`Lawyer: sending PDF (${(pdfBuffer.length / 1024).toFixed(1)} KB) to Gemini for analysis.`, "agent");
           try {
             const pdfBase64 = pdfBuffer.toString("base64");
-            const lawyerPrompt = `You are a Senior Legal Partner. The user's goal is: "${goal}". Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown and NO code blocks: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your summary including important points and contradictions here"}]. For list requests, return multiple objects in the array.`;
+            const lawyerPrompt = `You are a Senior Legal Partner. The user's goal is: "${goal}". Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Your deep summary with important points and contradictions here"}]. For list requests, return multiple objects in the array.`;
             const lawyerResponse = await ai.models.generateContent({
               model: "gemini-1.5-flash",
               contents: [{
