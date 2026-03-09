@@ -400,10 +400,10 @@ export async function runAgentLoop(
         let pdfBuffer: Buffer | null = null;
         try {
           const pdfUrl = await page.evaluate(() => {
-            const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => a.innerText.toLowerCase().includes('download pdf'));
+            const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => (a.innerText || "").toLowerCase().includes('download pdf'));
             if (downloadBtn && (downloadBtn as HTMLAnchorElement).href) return (downloadBtn as HTMLAnchorElement).href;
 
-            const pdfTab = Array.from(document.querySelectorAll('a')).find(a => a.innerText.trim().toLowerCase() === 'pdf');
+            const pdfTab = Array.from(document.querySelectorAll('a')).find(a => (a.innerText || "").trim().toLowerCase() === 'pdf');
             if (pdfTab && (pdfTab as HTMLAnchorElement).href) return (pdfTab as HTMLAnchorElement).href;
 
             const exactPdf = document.querySelector('a[href$=".pdf"]') as HTMLAnchorElement | null;
@@ -457,7 +457,7 @@ export async function runAgentLoop(
             const pdfBase64 = pdfBuffer.toString("base64");
             const lawyerPrompt = `You are a Senior Legal Partner. The user's goal is: "${goal}". Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Your deep summary with important points and contradictions here"}]. For list requests, return multiple objects in the array.`;
             const lawyerResponse = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-2.5-flash-lite",
               contents: [{
                 role: "user",
                 parts: [
@@ -490,7 +490,7 @@ export async function runAgentLoop(
               log(`Lawyer: sending ${fullText.length} chars of page text to Gemini.`, "agent");
               const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this webpage text. Write a highly professional, comprehensive 3-paragraph legal summary (Background, Core Issues, Verdict/Precedents). Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
               const lawyerResponse = await ai.models.generateContent({
-                model: "gemini-1.5-flash",
+                model: "gemini-2.5-flash-lite",
                 contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
               });
               let lawyerText = lawyerResponse.text?.trim() || "";
