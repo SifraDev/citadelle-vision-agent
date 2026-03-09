@@ -173,7 +173,8 @@ Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it
 - Use "scroll" to scroll down the page (no targetNumber needed)
-- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases. You MUST click the link to enter the specific case document/article first. Only use "extract" when you are inside the actual full text of the case, opinion, or legal document and can read its substantive content. When using the "extract" action, DO NOT summarize. You must extract and transcribe the ENTIRE main text of the legal opinion, verdict, or article visible on the screen. The extractedData should be highly detailed, comprehensive, and contain the full body of the document
+- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases. You MUST click the link to enter the specific case document/article first. Only use "extract" when you are inside the actual full text of the case, opinion, or legal document and can read its substantive content.
+- CRITICAL EXTRACTION FORMAT: When using the "extract" action, DO NOT dump raw page text. You must intelligently extract the case(s) into a structured JSON array format inside the extractedData string. Use this exact format: [{"title": "Full Case Name v. Party", "court": "Court Name", "date": "Date Filed or Decided", "docket": "Docket Number if available", "content": "The FULL detailed text of the opinion, verdict, or legal document. Be comprehensive and include all substantive content visible on the screen."}]. Always return valid JSON array syntax in extractedData
 - Use "done" when the goal appears to be accomplished
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical

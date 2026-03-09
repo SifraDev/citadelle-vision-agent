@@ -75,120 +75,157 @@ function ActionBadge({ message }: { message: string }) {
   return null;
 }
 
-function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () => void }) {
-  const downloadPdf = useCallback(async () => {
-    const { jsPDF } = await import("jspdf");
-    const doc = new jsPDF({ unit: "pt", format: "letter" });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 50;
-    const maxWidth = pageWidth - margin * 2;
-    let y = margin;
+interface CaseData {
+  title: string;
+  court: string;
+  date: string;
+  docket?: string;
+  content: string;
+}
 
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Citadelle Legal Brief", margin, y);
-    y += 30;
-
-    doc.setDrawColor(180);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 20;
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-
-    const lines = markdown.split("\n");
-    for (const line of lines) {
-      if (y > doc.internal.pageSize.getHeight() - margin) {
-        doc.addPage();
-        y = margin;
-      }
-      if (line.startsWith("# ")) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(16);
-        y += 8;
-        doc.text(line.slice(2), margin, y);
-        y += 22;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(11);
-      } else if (line.startsWith("## ")) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(13);
-        y += 6;
-        doc.text(line.slice(3), margin, y);
-        y += 18;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(11);
-      } else if (line.startsWith("### ")) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        y += 4;
-        doc.text(line.slice(4), margin, y);
-        y += 16;
-        doc.setFont("helvetica", "normal");
-      } else if (line.startsWith("- ") || line.startsWith("* ")) {
-        const cleaned = line.slice(2).replace(/\*\*/g, "");
-        const wrapped = doc.splitTextToSize(`  \u2022  ${cleaned}`, maxWidth);
-        doc.text(wrapped, margin, y);
-        y += wrapped.length * 14;
-      } else if (line.trim() === "") {
-        y += 8;
-      } else {
-        const cleaned = line.replace(/\*\*/g, "");
-        const wrapped = doc.splitTextToSize(cleaned, maxWidth);
-        doc.text(wrapped, margin, y);
-        y += wrapped.length * 14;
+function parseReportData(raw: string): { cases: CaseData[]; fallbackText: string | null } {
+  try {
+    let jsonStr = raw.trim();
+    if (jsonStr.startsWith("[")) {
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { cases: parsed, fallbackText: null };
       }
     }
+    const arrMatch = jsonStr.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      const parsed = JSON.parse(arrMatch[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { cases: parsed, fallbackText: null };
+      }
+    }
+  } catch {}
+  return { cases: [], fallbackText: raw };
+}
 
-    doc.save("citadelle_legal_brief.pdf");
-  }, [markdown]);
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function generateReportHtml(cases: CaseData[], goal: string, fallbackText: string | null): string {
+  const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const caseCardsHtml = cases.map((c, i) => `
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:32px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
+        <div>
+          <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:700;color:#1a202c;">${escHtml(c.title || `Case ${i + 1}`)}</h3>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            ${c.court ? `<span style="font-size:13px;color:#64748b;">${escHtml(c.court)}</span>` : ""}
+            ${c.date ? `<span style="font-size:13px;color:#64748b;">${escHtml(c.date)}</span>` : ""}
+            ${c.docket ? `<span style="font-size:13px;color:#64748b;">Docket: ${escHtml(c.docket)}</span>` : ""}
+          </div>
+        </div>
+        <span style="background:#ecfdf5;color:#059669;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;white-space:nowrap;">Extracted</span>
+      </div>
+      <hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0;" />
+      <div style="font-size:14px;line-height:1.75;color:#334155;white-space:pre-wrap;">${escHtml(c.content || "")}</div>
+    </div>
+  `).join("");
+
+  const fallbackHtml = fallbackText ? `
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:32px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+      <div style="font-size:14px;line-height:1.75;color:#334155;white-space:pre-wrap;">${escHtml(fallbackText)}</div>
+    </div>
+  ` : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Citadelle Legal Report</title>
+<style>
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none !important; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f8fafc; color: #1a202c; }
+</style>
+</head>
+<body>
+<div style="background:#0B132B;padding:48px 32px 40px;text-align:center;">
+  <div style="font-size:13px;letter-spacing:6px;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:8px;">Intelligence Division</div>
+  <h1 style="font-size:36px;font-weight:800;color:#ffffff;letter-spacing:2px;margin-bottom:6px;">CITADELLE</h1>
+  <p style="font-size:16px;color:rgba(255,255,255,0.6);margin-bottom:20px;">Legal Research Report</p>
+  <div style="font-size:13px;color:rgba(255,255,255,0.35);">Generated ${dateStr}</div>
+</div>
+<div style="max-width:800px;margin:0 auto;padding:32px 24px 64px;">
+  ${goal ? `
+  <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:20px 24px;margin-bottom:32px;">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#0284c7;font-weight:600;margin-bottom:6px;">Research Query</div>
+    <div style="font-size:15px;color:#0c4a6e;font-weight:500;">${escHtml(goal)}</div>
+  </div>` : ""}
+  <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600;margin-bottom:16px;">Extracted Cases (${cases.length || 1})</div>
+  ${cases.length > 0 ? caseCardsHtml : fallbackHtml}
+  <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
+    Citadelle Intelligence &mdash; Automated Legal Research Platform
+  </div>
+</div>
+<div class="no-print" style="position:fixed;bottom:24px;right:24px;background:#0B132B;color:white;padding:12px 24px;border-radius:8px;font-size:13px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);" onclick="window.print()">
+  Print / Save as PDF
+</div>
+</body>
+</html>`;
+}
+
+function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal: string; onClose: () => void }) {
+  const { cases, fallbackText } = parseReportData(reportRaw);
+
+  const openFullReport = useCallback(() => {
+    const html = generateReportHtml(cases, goal, fallbackText);
+    const newWin = window.open("", "_blank");
+    if (newWin) {
+      newWin.document.write(html);
+      newWin.document.close();
+    }
+  }, [cases, goal, fallbackText]);
 
   const downloadDocx = useCallback(async () => {
     const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
-    const paragraphs: typeof Paragraph.prototype[] = [];
+    const paragraphs: (typeof Paragraph.prototype)[] = [];
 
     paragraphs.push(
       new Paragraph({
-        children: [new TextRun({ text: "Citadelle Legal Brief", bold: true, size: 36, font: "Calibri" })],
+        children: [new TextRun({ text: "CITADELLE", bold: true, size: 40, font: "Calibri" })],
         heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 100 },
+      }),
+      new Paragraph({
+        children: [new TextRun({ text: "Legal Research Report", size: 24, font: "Calibri", color: "666666" })],
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 100 },
+      }),
+      new Paragraph({
+        children: [new TextRun({ text: `Generated: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`, size: 20, font: "Calibri", color: "999999" })],
         alignment: AlignmentType.CENTER,
         spacing: { after: 300 },
       })
     );
 
-    const lines = markdown.split("\n");
-    for (const line of lines) {
-      if (line.startsWith("# ")) {
-        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(2), bold: true, size: 32, font: "Calibri" })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 } }));
-      } else if (line.startsWith("## ")) {
-        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(3), bold: true, size: 26, font: "Calibri" })], heading: HeadingLevel.HEADING_2, spacing: { before: 160, after: 80 } }));
-      } else if (line.startsWith("### ")) {
-        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(4), bold: true, size: 22, font: "Calibri" })], heading: HeadingLevel.HEADING_3, spacing: { before: 120, after: 60 } }));
-      } else if (line.startsWith("- ") || line.startsWith("* ")) {
-        const content = line.slice(2);
-        const runs: (typeof TextRun.prototype)[] = [];
-        const parts = content.split(/(\*\*[^*]+\*\*)/g);
-        for (const part of parts) {
-          if (part.startsWith("**") && part.endsWith("**")) {
-            runs.push(new TextRun({ text: part.slice(2, -2), bold: true, size: 22, font: "Calibri" }));
-          } else {
-            runs.push(new TextRun({ text: part, size: 22, font: "Calibri" }));
-          }
-        }
-        paragraphs.push(new Paragraph({ children: runs, bullet: { level: 0 }, spacing: { after: 40 } }));
-      } else if (line.trim() === "") {
-        paragraphs.push(new Paragraph({ children: [], spacing: { after: 80 } }));
-      } else {
-        const runs: (typeof TextRun.prototype)[] = [];
-        const parts = line.split(/(\*\*[^*]+\*\*)/g);
-        for (const part of parts) {
-          if (part.startsWith("**") && part.endsWith("**")) {
-            runs.push(new TextRun({ text: part.slice(2, -2), bold: true, size: 22, font: "Calibri" }));
-          } else {
-            runs.push(new TextRun({ text: part, size: 22, font: "Calibri" }));
-          }
-        }
-        paragraphs.push(new Paragraph({ children: runs, spacing: { after: 60 } }));
+    if (goal) {
+      paragraphs.push(
+        new Paragraph({ children: [new TextRun({ text: "Research Query", bold: true, size: 22, font: "Calibri" })], spacing: { before: 200, after: 100 } }),
+        new Paragraph({ children: [new TextRun({ text: goal, size: 22, font: "Calibri", italics: true })], spacing: { after: 300 } })
+      );
+    }
+
+    const items = cases.length > 0 ? cases : [{ title: "Extracted Content", court: "", date: "", content: fallbackText || "" }];
+    for (const c of items) {
+      paragraphs.push(new Paragraph({ children: [new TextRun({ text: c.title || "Case", bold: true, size: 28, font: "Calibri" })], heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 80 } }));
+      const meta = [c.court, c.date, c.docket ? `Docket: ${c.docket}` : ""].filter(Boolean).join("  |  ");
+      if (meta) {
+        paragraphs.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, font: "Calibri", color: "888888" })], spacing: { after: 120 } }));
+      }
+      const contentLines = (c.content || "").split("\n");
+      for (const line of contentLines) {
+        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line, size: 22, font: "Calibri" })], spacing: { after: 40 } }));
       }
     }
 
@@ -202,94 +239,89 @@ function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () =
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [markdown]);
+  }, [cases, goal, fallbackText]);
 
-  const renderMarkdown = (text: string) => {
-    const lines = text.split("\n");
-    return lines.map((line, i) => {
-      if (line.startsWith("### ")) {
-        return <h3 key={i} className="text-base font-semibold text-sky-300 mt-4 mb-1">{line.slice(4)}</h3>;
-      }
-      if (line.startsWith("## ")) {
-        return <h2 key={i} className="text-lg font-bold text-sky-200 mt-5 mb-2">{line.slice(3)}</h2>;
-      }
-      if (line.startsWith("# ")) {
-        return <h1 key={i} className="text-xl font-bold text-white mt-4 mb-2">{line.slice(2)}</h1>;
-      }
-      if (line.startsWith("- ") || line.startsWith("* ")) {
-        return (
-          <div key={i} className="flex items-start gap-2 ml-3 my-0.5">
-            <span className="text-sky-400 mt-1 text-xs">&#9670;</span>
-            <span className="text-slate-300 text-sm leading-relaxed">{renderInlineMarkdown(line.slice(2))}</span>
-          </div>
-        );
-      }
-      if (line.trim() === "") {
-        return <div key={i} className="h-2" />;
-      }
-      return <p key={i} className="text-slate-300 text-sm leading-relaxed my-0.5">{renderInlineMarkdown(line)}</p>;
-    });
-  };
-
-  const renderInlineMarkdown = (text: string) => {
-    const parts = text.split(/(\*\*[^*]+\*\*)/g);
-    return parts.map((part, i) => {
-      if (part.startsWith("**") && part.endsWith("**")) {
-        return <strong key={i} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
-      }
-      return <span key={i}>{part}</span>;
-    });
-  };
+  const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-b from-slate-950 via-[#0c1222] to-slate-950 overflow-auto" data-testid="legal-brief-view">
-      <div className="border-b border-slate-800/60 bg-slate-900/40 backdrop-blur-sm px-6 py-4">
-        <div className="max-w-3xl mx-auto flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-gradient-to-br from-sky-500/20 to-indigo-500/20 border border-sky-500/20 shadow-lg shadow-sky-500/5">
-            <Shield className="w-5 h-5 text-sky-400" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-bold text-white tracking-tight">Citadelle Legal Brief</h2>
-            <p className="text-xs text-slate-500">Automated Intelligence Report</p>
-          </div>
-          <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-xs">
-            <CheckCircle2 className="w-3 h-3 mr-1" />
-            Complete
-          </Badge>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto px-6 py-6">
+    <div className="flex flex-col h-full overflow-hidden" data-testid="legal-brief-view">
+      <div className="px-8 py-6" style={{ background: "#0B132B" }}>
         <div className="max-w-3xl mx-auto">
-          <Card className="bg-slate-800/30 border-slate-700/40 backdrop-blur-sm p-8 shadow-2xl shadow-sky-500/5 rounded-xl">
-            <div className="prose prose-invert max-w-none">
-              {renderMarkdown(markdown)}
-            </div>
-          </Card>
+          <p className="text-[11px] uppercase tracking-[4px] text-white/30 mb-1">Intelligence Division</p>
+          <h1 className="text-2xl font-extrabold text-white tracking-wider mb-1">CITADELLE</h1>
+          <p className="text-sm text-white/50 mb-2">Legal Research Report</p>
+          <p className="text-xs text-white/25">Generated {dateStr}</p>
         </div>
       </div>
 
-      <div className="border-t border-slate-800/60 bg-slate-900/40 backdrop-blur-sm px-6 py-4">
+      <div className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-950">
+        <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
+          {goal && (
+            <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/40 rounded-xl px-5 py-4">
+              <p className="text-[11px] uppercase tracking-wider text-sky-600 dark:text-sky-400 font-semibold mb-1">Research Query</p>
+              <p className="text-sm text-sky-900 dark:text-sky-200 font-medium">{goal}</p>
+            </div>
+          )}
+
+          <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+            Extracted Cases ({cases.length || 1})
+          </p>
+
+          {cases.length > 0 ? cases.map((c, i) => (
+            <Card key={i} className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm rounded-xl overflow-hidden" data-testid={`card-case-${i}`}>
+              <div className="px-6 pt-5 pb-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">{c.title || `Case ${i + 1}`}</h3>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
+                      {c.court && <span className="text-xs text-slate-500 dark:text-slate-400">{c.court}</span>}
+                      {c.date && <span className="text-xs text-slate-500 dark:text-slate-400">{c.date}</span>}
+                      {c.docket && <span className="text-xs text-slate-500 dark:text-slate-400">Docket: {c.docket}</span>}
+                    </div>
+                  </div>
+                  <Badge className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 text-[10px] shrink-0">
+                    <CheckCircle2 className="w-3 h-3 mr-1" />
+                    Extracted
+                  </Badge>
+                </div>
+                <Separator className="bg-slate-100 dark:bg-slate-800 mb-4" />
+                <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-[500px] overflow-y-auto pr-2">
+                  {c.content}
+                </div>
+              </div>
+            </Card>
+          )) : fallbackText && (
+            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm rounded-xl overflow-hidden">
+              <div className="px-6 pt-5 pb-4">
+                <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                  {fallbackText}
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      <div className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 backdrop-blur-sm px-6 py-3.5">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           <Button
-            data-testid="button-download-pdf"
-            variant="outline"
+            data-testid="button-open-report"
             size="sm"
-            onClick={downloadPdf}
-            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
+            onClick={openFullReport}
+            className="gap-2 bg-[#0B132B] hover:bg-[#1a2744] text-white"
           >
-            <FileText className="w-4 h-4 text-sky-400" />
-            <span>Download Legal Brief (.pdf)</span>
+            <FileText className="w-4 h-4" />
+            <span>Open Full Report</span>
           </Button>
           <Button
             data-testid="button-download-docx"
             variant="outline"
             size="sm"
             onClick={downloadDocx}
-            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
+            className="gap-2 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition-all"
           >
-            <Download className="w-4 h-4 text-sky-400" />
-            <span>Export to Google Docs (.docx)</span>
+            <Download className="w-4 h-4" />
+            <span>Export .docx</span>
           </Button>
           <div className="flex-1" />
           <Button
@@ -297,7 +329,7 @@ function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () =
             variant="outline"
             size="sm"
             onClick={onClose}
-            className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-300 text-slate-400 transition-all"
+            className="gap-2 border-slate-300 dark:border-slate-700 hover:bg-red-50 dark:hover:bg-red-500/10 hover:border-red-300 dark:hover:border-red-500/30 hover:text-red-600 dark:hover:text-red-300 text-slate-400 transition-all"
           >
             <Square className="w-3.5 h-3.5" />
             Close Brief
@@ -317,6 +349,7 @@ export default function Dashboard() {
     currentStep,
     connected,
     reportData,
+    lastGoal,
     stopAgent,
     sendAudioCommand,
     clearSession,
@@ -583,7 +616,7 @@ export default function Dashboard() {
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 relative overflow-hidden bg-neutral-950">
             {showBrief ? (
-              <LegalBriefCard markdown={reportData} onClose={resetSession} />
+              <LegalBriefCard reportRaw={reportData} goal={lastGoal} onClose={resetSession} />
             ) : screenshot ? (
               <div className="relative w-full h-full">
                 <img

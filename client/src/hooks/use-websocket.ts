@@ -18,6 +18,7 @@ export function useAgentWebSocket() {
   const [currentStep, setCurrentStep] = useState(0);
   const [connected, setConnected] = useState(false);
   const [reportData, setReportData] = useState<string | null>(null);
+  const [lastGoal, setLastGoal] = useState<string>("");
   const reportDataRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
@@ -139,6 +140,9 @@ export function useAgentWebSocket() {
             break;
           case "log":
             addLog("log", msg.message || "");
+            if (msg.message && msg.message.startsWith("Mission: ")) {
+              setLastGoal(msg.message.slice(9));
+            }
             break;
         }
       } catch (e) {
@@ -164,6 +168,7 @@ export function useAgentWebSocket() {
     (goal: string, startUrl: string) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         setAgentState("running");
+        setLastGoal(goal);
         setCurrentStep(0);
         setLogs([]);
         setScreenshot(null);
@@ -196,6 +201,7 @@ export function useAgentWebSocket() {
     setScreenshot(null);
     setReportData(null);
     reportDataRef.current = null;
+    setLastGoal("");
     setAgentState("idle");
     setStatus("Ready");
     setCurrentStep(0);
@@ -232,6 +238,7 @@ export function useAgentWebSocket() {
     currentStep,
     connected,
     reportData,
+    lastGoal,
     startAgent,
     stopAgent,
     sendAudioCommand,
