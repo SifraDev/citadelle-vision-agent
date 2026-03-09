@@ -84,22 +84,46 @@ interface CaseData {
 }
 
 function parseReportData(raw: string): { cases: CaseData[]; fallbackText: string | null } {
+  const cleaned = raw.trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
+
+  const attempts = [
+    cleaned,
+    raw.trim(),
+  ];
+
+  for (const str of attempts) {
+    try {
+      if (str.startsWith("[")) {
+        const parsed = JSON.parse(str);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return { cases: parsed, fallbackText: null };
+        }
+      }
+    } catch {}
+  }
+
+  for (const str of attempts) {
+    try {
+      const arrMatch = str.match(/\[[\s\S]*\]/);
+      if (arrMatch) {
+        const parsed = JSON.parse(arrMatch[0]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return { cases: parsed, fallbackText: null };
+        }
+      }
+    } catch {}
+  }
+
   try {
-    let jsonStr = raw.trim();
-    if (jsonStr.startsWith("[")) {
-      const parsed = JSON.parse(jsonStr);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return { cases: parsed, fallbackText: null };
-      }
-    }
-    const arrMatch = jsonStr.match(/\[[\s\S]*\]/);
-    if (arrMatch) {
-      const parsed = JSON.parse(arrMatch[0]);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return { cases: parsed, fallbackText: null };
-      }
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.title) {
+      return { cases: [parsed as CaseData], fallbackText: null };
     }
   } catch {}
+
   return { cases: [], fallbackText: raw };
 }
 

@@ -375,7 +375,7 @@ export async function runAgentLoop(
           /^\/search/.test(pathname) ||
           /^\/results/.test(pathname) ||
           /^\/find\b/.test(pathname);
-        const listKeywords = /\d+\s*(lawsuits?|cases?|filings?|opinions?|results?)|last\s+\d+|latest|recent|list\s+of|find\s+all|multiple/i;
+        const listKeywords = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s*(lawsuits?|cases?|filings?|opinions?|results?)|last\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)|latest|recent|list\s+of|find\s+all|multiple|lawsuits|all\s+cases/i;
         const isListGoal = listKeywords.test(goal);
 
         if (isSearchPage && !isListGoal) {
