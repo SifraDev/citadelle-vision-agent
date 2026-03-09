@@ -76,30 +76,133 @@ function ActionBadge({ message }: { message: string }) {
 }
 
 function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () => void }) {
-  const downloadTxt = useCallback(() => {
-    const blob = new Blob([markdown], { type: "text/plain;charset=utf-8" });
+  const downloadPdf = useCallback(async () => {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "letter" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 50;
+    const maxWidth = pageWidth - margin * 2;
+    let y = margin;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text("Citadelle Legal Brief", margin, y);
+    y += 30;
+
+    doc.setDrawColor(180);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 20;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+
+    const lines = markdown.split("\n");
+    for (const line of lines) {
+      if (y > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage();
+        y = margin;
+      }
+      if (line.startsWith("# ")) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        y += 8;
+        doc.text(line.slice(2), margin, y);
+        y += 22;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+      } else if (line.startsWith("## ")) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        y += 6;
+        doc.text(line.slice(3), margin, y);
+        y += 18;
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(11);
+      } else if (line.startsWith("### ")) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        y += 4;
+        doc.text(line.slice(4), margin, y);
+        y += 16;
+        doc.setFont("helvetica", "normal");
+      } else if (line.startsWith("- ") || line.startsWith("* ")) {
+        const cleaned = line.slice(2).replace(/\*\*/g, "");
+        const wrapped = doc.splitTextToSize(`  \u2022  ${cleaned}`, maxWidth);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 14;
+      } else if (line.trim() === "") {
+        y += 8;
+      } else {
+        const cleaned = line.replace(/\*\*/g, "");
+        const wrapped = doc.splitTextToSize(cleaned, maxWidth);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 14;
+      }
+    }
+
+    doc.save("citadelle_legal_brief.pdf");
+  }, [markdown]);
+
+  const downloadDocx = useCallback(async () => {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+    const paragraphs: typeof Paragraph.prototype[] = [];
+
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun({ text: "Citadelle Legal Brief", bold: true, size: 36, font: "Calibri" })],
+        heading: HeadingLevel.TITLE,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 300 },
+      })
+    );
+
+    const lines = markdown.split("\n");
+    for (const line of lines) {
+      if (line.startsWith("# ")) {
+        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(2), bold: true, size: 32, font: "Calibri" })], heading: HeadingLevel.HEADING_1, spacing: { before: 200, after: 100 } }));
+      } else if (line.startsWith("## ")) {
+        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(3), bold: true, size: 26, font: "Calibri" })], heading: HeadingLevel.HEADING_2, spacing: { before: 160, after: 80 } }));
+      } else if (line.startsWith("### ")) {
+        paragraphs.push(new Paragraph({ children: [new TextRun({ text: line.slice(4), bold: true, size: 22, font: "Calibri" })], heading: HeadingLevel.HEADING_3, spacing: { before: 120, after: 60 } }));
+      } else if (line.startsWith("- ") || line.startsWith("* ")) {
+        const content = line.slice(2);
+        const runs: (typeof TextRun.prototype)[] = [];
+        const parts = content.split(/(\*\*[^*]+\*\*)/g);
+        for (const part of parts) {
+          if (part.startsWith("**") && part.endsWith("**")) {
+            runs.push(new TextRun({ text: part.slice(2, -2), bold: true, size: 22, font: "Calibri" }));
+          } else {
+            runs.push(new TextRun({ text: part, size: 22, font: "Calibri" }));
+          }
+        }
+        paragraphs.push(new Paragraph({ children: runs, bullet: { level: 0 }, spacing: { after: 40 } }));
+      } else if (line.trim() === "") {
+        paragraphs.push(new Paragraph({ children: [], spacing: { after: 80 } }));
+      } else {
+        const runs: (typeof TextRun.prototype)[] = [];
+        const parts = line.split(/(\*\*[^*]+\*\*)/g);
+        for (const part of parts) {
+          if (part.startsWith("**") && part.endsWith("**")) {
+            runs.push(new TextRun({ text: part.slice(2, -2), bold: true, size: 22, font: "Calibri" }));
+          } else {
+            runs.push(new TextRun({ text: part, size: 22, font: "Calibri" }));
+          }
+        }
+        paragraphs.push(new Paragraph({ children: runs, spacing: { after: 60 } }));
+      }
+    }
+
+    const doc = new Document({ sections: [{ children: paragraphs }] });
+    const blob = await Packer.toBlob(doc);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "citadelle_legal_brief.txt";
+    a.download = "citadelle_legal_brief.docx";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, [markdown]);
-
-  const downloadCsv = useCallback(() => {
-    const csv = "Date,Case Name,Status\n2026,Extracted Case,Processed\n";
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "citadelle_case_data.csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }, []);
 
   const renderMarkdown = (text: string) => {
     const lines = text.split("\n");
@@ -169,24 +272,24 @@ function LegalBriefCard({ markdown, onClose }: { markdown: string; onClose: () =
       <div className="border-t border-slate-800/60 bg-slate-900/40 backdrop-blur-sm px-6 py-4">
         <div className="max-w-3xl mx-auto flex items-center gap-3">
           <Button
-            data-testid="button-download-txt"
+            data-testid="button-download-pdf"
             variant="outline"
             size="sm"
-            onClick={downloadTxt}
+            onClick={downloadPdf}
             className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
           >
             <FileText className="w-4 h-4 text-sky-400" />
-            <span>Download Legal Brief (.txt)</span>
+            <span>Download Legal Brief (.pdf)</span>
           </Button>
           <Button
-            data-testid="button-download-csv"
+            data-testid="button-download-docx"
             variant="outline"
             size="sm"
-            onClick={downloadCsv}
+            onClick={downloadDocx}
             className="gap-2 bg-slate-800/60 border-slate-600/40 hover:bg-slate-700/60 hover:border-sky-500/30 text-slate-200 transition-all"
           >
             <Download className="w-4 h-4 text-sky-400" />
-            <span>Download Case Data (.csv)</span>
+            <span>Export to Google Docs (.docx)</span>
           </Button>
           <div className="flex-1" />
           <Button

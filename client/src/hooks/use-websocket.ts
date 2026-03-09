@@ -32,12 +32,37 @@ export function useAgentWebSocket() {
 
   const speakMessage = useCallback((text: string) => {
     try {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+
+      const pickVoiceAndSpeak = () => {
+        const voices = window.speechSynthesis.getVoices();
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.95;
+        const premiumKeywords = ["Google", "Samantha", "Daniel", "Premium", "Natural"];
+        const preferred = voices.find((v) =>
+          premiumKeywords.some((kw) => v.name.includes(kw))
+        );
+        if (preferred) {
+          utterance.voice = preferred;
+        }
         utterance.pitch = 1.0;
+        utterance.rate = 1.05;
         window.speechSynthesis.speak(utterance);
+      };
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        pickVoiceAndSpeak();
+      } else {
+        const fallbackTimer = setTimeout(() => {
+          window.speechSynthesis.onvoiceschanged = null;
+          pickVoiceAndSpeak();
+        }, 1000);
+        window.speechSynthesis.onvoiceschanged = () => {
+          clearTimeout(fallbackTimer);
+          pickVoiceAndSpeak();
+          window.speechSynthesis.onvoiceschanged = null;
+        };
       }
     } catch {}
   }, []);

@@ -173,7 +173,7 @@ Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it
 - Use "scroll" to scroll down the page (no targetNumber needed)
-- Use "extract" ONLY when you are inside the target legal case/document and can read the details. Summarize the findings into "extractedData"
+- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases. You MUST click the link to enter the specific case document/article first. Only use "extract" when you are inside the actual full text of the case, opinion, or legal document and can read its substantive content. Summarize the findings into "extractedData"
 - Use "done" when the goal appears to be accomplished
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical`;
@@ -344,6 +344,20 @@ export async function runAgentLoop(
       });
 
       if (action.action === "extract") {
+        const currentUrl = page.url().toLowerCase();
+        const searchPatterns = [
+          /[?&]q=/, /[?&]query=/, /[?&]search=/, /[?&]s=/,
+          /\/search/, /\/results/, /\/find\b/,
+          /google\.com/, /bing\.com/, /duckduckgo/,
+        ];
+        const isSearchPage = searchPatterns.some((p) => p.test(currentUrl));
+        if (isSearchPage) {
+          log(`Extract blocked: page appears to be a search/results page (${currentUrl}). Forcing navigation.`, "agent");
+          send({ type: "log", message: "Extraction blocked — still on search results. Navigating to the actual document..." });
+          action.action = "scroll";
+          continue;
+        }
+
         send({ type: "report", message: action.extractedData });
         await removeMarkers(page);
         log(`Extract action completed. Data extracted successfully.`, "agent");

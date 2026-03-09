@@ -34,8 +34,8 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 - **Jarvis Voice UI**: Single large microphone button — no typing required. Records raw audio via MediaRecorder API and sends base64-encoded audio to the backend
 - **Native Audio Parser**: Backend `jarvis-parser.ts` sends raw audio directly to Gemini's native audio understanding (inlineData) to extract URL + goal — no browser SpeechRecognition used
 - **Legal Brief View**: When a `report` WebSocket message is received, the screenshot viewer is replaced with a styled "Citadelle Legal Brief" card rendering the markdown content
-- **Downloads**: .txt (full brief) and .csv (mock case data) download buttons on the legal brief card
-- **Text-to-Speech**: Uses `speechSynthesis` to announce when extraction/investigation is complete
+- **Downloads**: Real PDF generation via `jspdf` with formatted headings/margins, and `.docx` export via `docx` library for Google Docs/Word compatibility
+- **Text-to-Speech**: Premium voice selection — searches for Google/Samantha/Daniel/Premium/Natural voices via `speechSynthesis.getVoices()`, with professional pitch (1.0) and rate (1.05). Fires immediately on report delivery
 - **Voice Activity Detection (VAD)**: AudioContext + AnalyserNode monitors microphone volume in real-time. Auto-stops recording after 1.5s of silence once speech is detected. Shows reactive volume pulse and auto-submit indicator
 - **Session Reset**: "New Mission" button appears after run completion to clear state and return to mic view
 
