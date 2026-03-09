@@ -8,7 +8,6 @@ import { Separator } from "@/components/ui/separator";
 import {
   Square,
   Zap,
-  MonitorPlay,
   Terminal,
   Wifi,
   WifiOff,
@@ -199,74 +198,117 @@ export default function Dashboard() {
     currentStep,
     connected,
     reportData,
-    startAgent,
     stopAgent,
-    sendJarvisCommand,
+    sendAudioCommand,
     clearSession,
   } = useAgentWebSocket();
 
-  const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
   const logsEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  const toggleVoiceInput = useCallback(() => {
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-
-    recognition.onresult = (event: any) => {
-      const current = event.results[event.results.length - 1];
-      const text = current[0].transcript;
-      setTranscript(text);
-
-      if (current.isFinal) {
-        setIsListening(false);
-        setTranscript("");
-        if (text.trim()) {
-          sendJarvisCommand(text.trim());
-        }
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
       }
     };
+  }, []);
 
-    recognition.onerror = () => {
-      setIsListening(false);
-      setTranscript("");
-    };
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
 
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "audio/mp4";
 
-    recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-    setTranscript("");
-  }, [isListening, sendJarvisCommand]);
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+        setRecordingDuration(0);
+
+        stream.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        if (blob.size < 1000) return;
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = (reader.result as string).split(",")[1];
+          if (base64) {
+            const simpleMime = mimeType.split(";")[0];
+            sendAudioCommand(base64, simpleMime);
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      timerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+    } catch {
+      setIsRecording(false);
+    }
+  }, [sendAudioCommand]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
+
+  const toggleRecording = useCallback(() => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, startRecording, stopRecording]);
 
   const showBrief = !!reportData;
 
   const resetSession = useCallback(() => {
     clearSession();
-    setIsListening(false);
-    setTranscript("");
+    setIsRecording(false);
+    setRecordingDuration(0);
   }, [clearSession]);
+
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
 
   return (
     <div className="flex flex-col h-screen bg-background" data-testid="dashboard">
@@ -356,26 +398,26 @@ export default function Dashboard() {
                 <div className="relative">
                   <button
                     data-testid="button-jarvis-mic"
-                    onClick={toggleVoiceInput}
+                    onClick={toggleRecording}
                     disabled={agentState === "running" || !connected}
                     className={`
                       relative z-10 w-32 h-32 rounded-full flex items-center justify-center
                       transition-all duration-300 cursor-pointer
                       disabled:opacity-40 disabled:cursor-not-allowed
-                      ${isListening
+                      ${isRecording
                         ? "bg-red-500/20 border-2 border-red-400 shadow-[0_0_40px_rgba(239,68,68,0.3)]"
                         : "bg-sky-500/10 border-2 border-sky-500/30 hover:border-sky-400 hover:bg-sky-500/20 hover:shadow-[0_0_40px_rgba(56,189,248,0.2)]"
                       }
                     `}
                   >
-                    {isListening ? (
+                    {isRecording ? (
                       <MicOff className="w-12 h-12 text-red-400" />
                     ) : (
                       <Mic className="w-12 h-12 text-sky-400" />
                     )}
                   </button>
 
-                  {isListening && (
+                  {isRecording && (
                     <>
                       <div className="absolute inset-0 rounded-full border-2 border-red-400/30 animate-ping" />
                       <div className="absolute -inset-3 rounded-full border border-red-400/10 animate-pulse" />
@@ -384,14 +426,12 @@ export default function Dashboard() {
                 </div>
 
                 <div className="text-center max-w-md">
-                  {isListening ? (
+                  {isRecording ? (
                     <>
-                      <p className="text-sm font-medium text-red-400 animate-pulse">Listening...</p>
-                      {transcript && (
-                        <p className="text-xs text-muted-foreground mt-2 italic px-4">
-                          "{transcript}"
-                        </p>
-                      )}
+                      <p className="text-sm font-medium text-red-400 animate-pulse">Recording... {formatDuration(recordingDuration)}</p>
+                      <p className="text-xs text-muted-foreground/60 mt-2">
+                        Tap again to stop and send to Gemini
+                      </p>
                     </>
                   ) : (
                     <>

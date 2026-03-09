@@ -171,20 +171,21 @@ export function useAgentWebSocket() {
     setLogs([]);
   }, []);
 
-  const sendJarvisCommand = useCallback(
-    (text: string) => {
+  const sendAudioCommand = useCallback(
+    (audioBase64: string, mimeType: string) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         setAgentState("running");
         setCurrentStep(0);
         setLogs([]);
         setScreenshot(null);
         setReportData(null);
-        setStatus("Processing voice command...");
-        addLog("status", `Voice command: "${text}"`);
+        setStatus("Sending audio to Gemini...");
+        addLog("status", "Voice command captured. Processing with Gemini...");
 
         const msg: WsMessageToServer = {
-          type: "jarvis_command",
-          text,
+          type: "audio_command",
+          audioBase64,
+          mimeType,
         };
         wsRef.current.send(JSON.stringify(msg));
       }
@@ -202,7 +203,7 @@ export function useAgentWebSocket() {
     reportData,
     startAgent,
     stopAgent,
-    sendJarvisCommand,
+    sendAudioCommand,
     clearSession,
   };
 }

@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { type Server } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { runAgentLoop } from "./agent";
-import { parseJarvisCommand } from "./jarvis-parser";
+import { parseAudioCommand } from "./jarvis-parser";
 import type { WsMessageToServer, WsMessageToClient } from "@shared/schema";
 import { log } from "./index";
 
@@ -27,42 +27,43 @@ export async function registerRoutes(
       try {
         const msg: WsMessageToServer = JSON.parse(raw.toString());
 
-        if (msg.type === "jarvis_command") {
+        if (msg.type === "audio_command") {
           if (isRunning) {
             send({ type: "error", message: "Agent is already running. Stop it first." });
             return;
           }
 
-          const voiceText = msg.text || "";
-          if (!voiceText.trim()) {
-            send({ type: "error", message: "No voice command received." });
+          const audioData = msg.audioBase64 || "";
+          const mimeType = msg.mimeType || "audio/webm";
+          if (!audioData) {
+            send({ type: "error", message: "No audio data received." });
             return;
           }
 
           stopFlag = false;
           isRunning = true;
-          send({ type: "status", message: "Parsing your command..." });
-          log(`Jarvis command received: "${voiceText}"`, "ws");
+          send({ type: "status", message: "Processing voice command with Gemini..." });
+          log(`Audio command received (${mimeType}, ${Math.round(audioData.length / 1024)}KB)`, "ws");
 
           try {
-            const parsed = await parseJarvisCommand(voiceText);
+            const parsed = await parseAudioCommand(audioData, mimeType);
 
             if (stopFlag) {
-              log("Stop requested during command parsing, aborting.", "ws");
+              log("Stop requested during audio parsing, aborting.", "ws");
               send({ type: "status", message: "Stopped." });
               isRunning = false;
               return;
             }
 
-            log(`Parsed command: url="${parsed.url}", goal="${parsed.goal}"`, "ws");
+            log(`Parsed audio: url="${parsed.url}", goal="${parsed.goal}"`, "ws");
             send({ type: "log", message: `Target: ${parsed.url}` });
             send({ type: "log", message: `Mission: ${parsed.goal}` });
             send({ type: "status", message: "Agent launching..." });
 
             await runAgentLoop(parsed.goal, parsed.url, send, () => stopFlag);
           } catch (parseErr: any) {
-            log(`Jarvis parse error: ${parseErr.message}`, "ws");
-            send({ type: "error", message: `Failed to parse command: ${parseErr.message}` });
+            log(`Audio parse error: ${parseErr.message}`, "ws");
+            send({ type: "error", message: `Failed to process voice command: ${parseErr.message}` });
           } finally {
             isRunning = false;
           }

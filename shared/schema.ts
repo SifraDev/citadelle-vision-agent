@@ -15,10 +15,11 @@ export interface MarkerMapping {
 }
 
 export interface WsMessageToServer {
-  type: "start_agent" | "stop_agent" | "jarvis_command";
+  type: "start_agent" | "stop_agent" | "audio_command";
   goal?: string;
   startUrl?: string;
-  text?: string;
+  audioBase64?: string;
+  mimeType?: string;
 }
 
 export interface WsMessageToClient {
