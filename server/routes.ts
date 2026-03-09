@@ -55,15 +55,27 @@ export async function registerRoutes(
               return;
             }
 
+            if (!parsed.goal || !parsed.goal.trim()) {
+              log("Audio parsed but goal was empty — likely silence or noise.", "ws");
+              send({ type: "error", message: "Couldn't understand that. Please speak clearly and try again." });
+              isRunning = false;
+              return;
+            }
+
             log(`Parsed audio: url="${parsed.url}", goal="${parsed.goal}"`, "ws");
-            send({ type: "log", message: `Target: ${parsed.url}` });
+            send({ type: "log", message: `Target: ${parsed.url || "https://www.google.com"}` });
             send({ type: "log", message: `Mission: ${parsed.goal}` });
             send({ type: "status", message: "Agent launching..." });
 
-            await runAgentLoop(parsed.goal, parsed.url, send, () => stopFlag);
+            const targetUrl = parsed.url && parsed.url.trim() ? parsed.url : "https://www.google.com";
+            await runAgentLoop(parsed.goal, targetUrl, send, () => stopFlag);
           } catch (parseErr: any) {
             log(`Audio parse error: ${parseErr.message}`, "ws");
-            send({ type: "error", message: `Failed to process voice command: ${parseErr.message}` });
+            if (parseErr.message === "AUDIO_TOO_SHORT") {
+              send({ type: "error", message: "Audio too short or silent. Please try speaking again." });
+            } else {
+              send({ type: "error", message: `Failed to process voice command: ${parseErr.message}` });
+            }
           } finally {
             isRunning = false;
           }
