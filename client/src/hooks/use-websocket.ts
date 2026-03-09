@@ -17,6 +17,7 @@ export function useAgentWebSocket() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [connected, setConnected] = useState(false);
+  const [reportData, setReportData] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -27,6 +28,18 @@ export function useAgentWebSocket() {
       ...prev,
       { id: ++logIdRef.current, timestamp: new Date(), type, message },
     ]);
+  }, []);
+
+  const speakMessage = useCallback((text: string) => {
+    try {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch {}
   }, []);
 
   const connect = useCallback(() => {
@@ -82,10 +95,17 @@ export function useAgentWebSocket() {
             setStatus(msg.message || "Error occurred");
             addLog("error", msg.message || "Unknown error");
             break;
+          case "report":
+            setReportData(msg.message || null);
+            addLog("status", "Legal brief generated.");
+            break;
           case "done":
             setAgentState("done");
             setStatus(msg.message || "Done");
             addLog("status", msg.message || "Task completed");
+            if (msg.message && msg.message.includes("Extraction complete")) {
+              speakMessage("Investigation complete. The legal brief is ready.");
+            }
             break;
           case "log":
             addLog("log", msg.message || "");
@@ -95,7 +115,7 @@ export function useAgentWebSocket() {
         console.error("Failed to parse WebSocket message:", e);
       }
     };
-  }, [addLog]);
+  }, [addLog, speakMessage]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -117,6 +137,7 @@ export function useAgentWebSocket() {
         setCurrentStep(0);
         setLogs([]);
         setScreenshot(null);
+        setReportData(null);
         setStatus("Starting agent...");
         addLog("status", `Starting: "${goal}" at ${startUrl}`);
 
@@ -148,6 +169,7 @@ export function useAgentWebSocket() {
     logs,
     currentStep,
     connected,
+    reportData,
     startAgent,
     stopAgent,
   };

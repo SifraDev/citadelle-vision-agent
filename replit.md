@@ -23,10 +23,18 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 2. Playwright opens a headless browser to the URL
 3. `injectMarkers()` overlays numbered red bounding boxes on interactive elements
 4. Screenshot is taken and sent to Gemini 2.5 Flash with the goal
-5. AI returns a JSON action (click/type/scroll/done)
+5. AI returns a JSON action (click/type/scroll/extract/done)
 6. Action is executed on the page, markers removed
+   - `extract` action sends extracted data as a "report" WebSocket message and ends the session
 7. Loop repeats until done or max steps (15)
 8. All screenshots and logs stream to the frontend via WebSocket
+
+## Frontend Features
+
+- **Voice Input**: Microphone button next to goal input uses Web Speech Recognition API
+- **Legal Brief View**: When a `report` WebSocket message is received, the screenshot viewer is replaced with a styled "Citadelle Legal Brief" card rendering the markdown content
+- **Downloads**: .txt (full brief) and .csv (mock case data) download buttons on the legal brief card
+- **Text-to-Speech**: Uses `speechSynthesis` to announce when extraction/investigation is complete
 
 ## Environment Variables
 
