@@ -31,10 +31,12 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 
 ## Frontend Features
 
-- **Voice Input**: Microphone button next to goal input uses Web Speech Recognition API
+- **Jarvis Voice UI**: Single large microphone button — no typing required. User speaks a full command, which is sent to the backend for parsing
+- **Smart Parser**: Backend `jarvis-parser.ts` uses Gemini to extract URL + goal from natural language voice commands
 - **Legal Brief View**: When a `report` WebSocket message is received, the screenshot viewer is replaced with a styled "Citadelle Legal Brief" card rendering the markdown content
 - **Downloads**: .txt (full brief) and .csv (mock case data) download buttons on the legal brief card
 - **Text-to-Speech**: Uses `speechSynthesis` to announce when extraction/investigation is complete
+- **Session Reset**: "New Mission" button appears after run completion to clear state and return to mic view
 
 ## Environment Variables
 

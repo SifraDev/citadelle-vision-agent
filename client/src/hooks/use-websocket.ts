@@ -162,6 +162,36 @@ export function useAgentWebSocket() {
     }
   }, [addLog]);
 
+  const clearSession = useCallback(() => {
+    setScreenshot(null);
+    setReportData(null);
+    setAgentState("idle");
+    setStatus("Ready");
+    setCurrentStep(0);
+    setLogs([]);
+  }, []);
+
+  const sendJarvisCommand = useCallback(
+    (text: string) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        setAgentState("running");
+        setCurrentStep(0);
+        setLogs([]);
+        setScreenshot(null);
+        setReportData(null);
+        setStatus("Processing voice command...");
+        addLog("status", `Voice command: "${text}"`);
+
+        const msg: WsMessageToServer = {
+          type: "jarvis_command",
+          text,
+        };
+        wsRef.current.send(JSON.stringify(msg));
+      }
+    },
+    [addLog]
+  );
+
   return {
     screenshot,
     status,
@@ -172,5 +202,7 @@ export function useAgentWebSocket() {
     reportData,
     startAgent,
     stopAgent,
+    sendJarvisCommand,
+    clearSession,
   };
 }
