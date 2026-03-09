@@ -345,12 +345,15 @@ export async function runAgentLoop(
 
       if (action.action === "extract") {
         const currentUrl = page.url().toLowerCase();
-        const searchPatterns = [
-          /[?&]q=/, /[?&]query=/, /[?&]search=/, /[?&]s=/,
-          /\/search/, /\/results/, /\/find\b/,
-          /google\.com/, /bing\.com/, /duckduckgo/,
-        ];
-        const isSearchPage = searchPatterns.some((p) => p.test(currentUrl));
+        const pathname = new URL(currentUrl).pathname;
+        const isSearchPage =
+          /google\.com/.test(currentUrl) ||
+          /bing\.com/.test(currentUrl) ||
+          /duckduckgo/.test(currentUrl) ||
+          pathname === "/" ||
+          /^\/search/.test(pathname) ||
+          /^\/results/.test(pathname) ||
+          /^\/find\b/.test(pathname);
         if (isSearchPage) {
           log(`Extract blocked: page appears to be a search/results page (${currentUrl}). Forcing navigation.`, "agent");
           send({ type: "log", message: "Extraction blocked — still on search results. Navigating to the actual document..." });

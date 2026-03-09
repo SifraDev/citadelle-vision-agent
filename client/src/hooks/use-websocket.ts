@@ -18,6 +18,7 @@ export function useAgentWebSocket() {
   const [currentStep, setCurrentStep] = useState(0);
   const [connected, setConnected] = useState(false);
   const [reportData, setReportData] = useState<string | null>(null);
+  const reportDataRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,13 +122,19 @@ export function useAgentWebSocket() {
             addLog("error", msg.message || "Unknown error");
             break;
           case "report":
-            setReportData(msg.message || null);
-            addLog("status", "Legal brief generated.");
-            speakMessage("Investigation complete. The legal brief is ready.");
+            if (msg.message) {
+              reportDataRef.current = msg.message;
+              setReportData(msg.message);
+              setAgentState("done");
+              addLog("status", "Legal brief generated.");
+              speakMessage("Investigation complete. The legal brief is ready.");
+            }
             break;
           case "done":
             setAgentState("done");
-            setStatus(msg.message || "Done");
+            if (!reportDataRef.current) {
+              setStatus(msg.message || "Done");
+            }
             addLog("status", msg.message || "Task completed");
             break;
           case "log":
@@ -188,6 +195,7 @@ export function useAgentWebSocket() {
   const clearSession = useCallback(() => {
     setScreenshot(null);
     setReportData(null);
+    reportDataRef.current = null;
     setAgentState("idle");
     setStatus("Ready");
     setCurrentStep(0);
