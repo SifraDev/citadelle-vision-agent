@@ -267,6 +267,47 @@ function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal:
     URL.revokeObjectURL(url);
   }, [cases, goal, fallbackText]);
 
+  const openSingleCaseReport = useCallback((c: CaseData, label: string) => {
+    const html = generateReportHtml([c], goal, null);
+    const newWin = window.open("", "_blank");
+    if (newWin) {
+      newWin.document.write(html);
+      newWin.document.close();
+    }
+  }, [goal]);
+
+  const downloadSingleCaseDocx = useCallback(async (c: CaseData, label: string) => {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+    const paragraphs: (typeof Paragraph.prototype)[] = [];
+    paragraphs.push(
+      new Paragraph({ children: [new TextRun({ text: "CITADELLE", bold: true, size: 40, font: "Calibri" })], heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
+      new Paragraph({ children: [new TextRun({ text: label, size: 24, font: "Calibri", color: "666666" })], alignment: AlignmentType.CENTER, spacing: { after: 100 } }),
+      new Paragraph({ children: [new TextRun({ text: `Generated: ${new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}`, size: 20, font: "Calibri", color: "999999" })], alignment: AlignmentType.CENTER, spacing: { after: 300 } })
+    );
+    if (goal) {
+      paragraphs.push(
+        new Paragraph({ children: [new TextRun({ text: "Research Query", bold: true, size: 22, font: "Calibri" })], spacing: { before: 200, after: 100 } }),
+        new Paragraph({ children: [new TextRun({ text: goal, size: 22, font: "Calibri", italics: true })], spacing: { after: 300 } })
+      );
+    }
+    paragraphs.push(new Paragraph({ children: [new TextRun({ text: c.title || "Case", bold: true, size: 28, font: "Calibri" })], heading: HeadingLevel.HEADING_1, spacing: { before: 300, after: 80 } }));
+    const meta = [c.court, c.date, c.docket ? `Docket: ${c.docket}` : ""].filter(Boolean).join("  |  ");
+    if (meta) paragraphs.push(new Paragraph({ children: [new TextRun({ text: meta, size: 20, font: "Calibri", color: "888888" })], spacing: { after: 120 } }));
+    for (const line of (c.content || "").split("\n")) {
+      paragraphs.push(new Paragraph({ children: [new TextRun({ text: line, size: 22, font: "Calibri" })], spacing: { after: 40 } }));
+    }
+    const doc = new Document({ sections: [{ children: paragraphs }] });
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `citadelle_${(c.title || label).replace(/[^a-zA-Z0-9]/g, "_").toLowerCase()}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [goal]);
+
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
   return (
@@ -325,6 +366,30 @@ function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal:
                 <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-[500px] overflow-y-auto pr-2">
                   {c.content}
                 </div>
+                {cases.length > 1 && (
+                  <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <Button
+                      data-testid={`button-case-pdf-${i}`}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openSingleCaseReport(c, caseLabel || `Case ${i + 1}`)}
+                      className="gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 h-7 px-2.5"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      Open as PDF
+                    </Button>
+                    <Button
+                      data-testid={`button-case-docx-${i}`}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => downloadSingleCaseDocx(c, caseLabel || `Case ${i + 1}`)}
+                      className="gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 h-7 px-2.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Export .docx
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
           );}) : fallbackText && (
