@@ -176,7 +176,8 @@ Rules:
 - CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases. You MUST click the link to enter the specific case document/article first. Only use "extract" when you are inside the actual full text of the case, opinion, or legal document and can read its substantive content. When using the "extract" action, DO NOT summarize. You must extract and transcribe the ENTIRE main text of the legal opinion, verdict, or article visible on the screen. The extractedData should be highly detailed, comprehensive, and contain the full body of the document
 - Use "done" when the goal appears to be accomplished
 - targetNumber must match a visible numbered label in the screenshot
-- Be precise and methodical`;
+- Be precise and methodical
+- CRITICAL: You must return EXACTLY ONE single JSON object per turn. DO NOT chain multiple actions. DO NOT output multiple JSON blocks. Analyze the screen, pick the SINGLE best next step, output its JSON, and stop.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash-lite",
@@ -199,13 +200,29 @@ Rules:
   const rawText = response.text || "";
   log(`Gemini raw response: ${rawText}`, "agent");
 
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
+  let jsonStr: string | null = null;
+
+  const firstBrace = rawText.indexOf("{");
+  if (firstBrace === -1) {
     throw new Error("No JSON found in response: " + rawText.slice(0, 100));
   }
 
+  let depth = 0;
+  for (let i = firstBrace; i < rawText.length; i++) {
+    if (rawText[i] === "{") depth++;
+    else if (rawText[i] === "}") depth--;
+    if (depth === 0) {
+      jsonStr = rawText.slice(firstBrace, i + 1);
+      break;
+    }
+  }
+
+  if (!jsonStr) {
+    throw new Error("Malformed JSON in response: " + rawText.slice(0, 200));
+  }
+
   try {
-    const parsed = JSON.parse(jsonMatch[0]);
+    const parsed = JSON.parse(jsonStr);
     return {
       action: parsed.action || "done",
       targetNumber: parsed.targetNumber,
@@ -214,8 +231,8 @@ Rules:
       reasoning: parsed.reasoning,
     };
   } catch {
-    log(`Failed to parse Gemini response: ${jsonMatch[0]}`, "agent");
-    throw new Error(`Failed to parse AI response: ${jsonMatch[0].slice(0, 200)}`);
+    log(`Failed to parse Gemini response: ${jsonStr}`, "agent");
+    throw new Error(`Failed to parse AI response: ${jsonStr.slice(0, 200)}`);
   }
 }
 
