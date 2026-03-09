@@ -173,12 +173,11 @@ Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
 - Use "scroll" to scroll down the page (no targetNumber needed)
-- CRITICAL RULE FOR EXTRACT: When you arrive at a case page, DO NOT use the "extract" action immediately. You MUST explicitly use the "click" action on the "PDF" tab or the "Download PDF" button first. ONLY use the "extract" action AFTER you have navigated to the PDF view. Your goal is to get the actual PDF document.
-- EXCEPTION TO EXTRACT RULE: If the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases"), you ARE ALLOWED to use the "extract" action directly on the search results page. You do not need to click into individual cases for list requests. Extract all visible matching cases from the results.
-- WRONG PAGE RULE: If you realize you are on the WRONG case or page, DO NOT use the "extract" action to try and escape or summarize what you see. You must use "click" to go back, or "type" to search again. The "extract" action is ONLY for when you are looking at the correct target document that matches the user's goal.
-- CRITICAL EXTRACTION FORMAT: When using the "extract" action, DO NOT dump raw page text. You must intelligently extract the case(s) into a structured JSON array format inside the extractedData string. Use this exact format: [{"title": "Full Case Name v. Party", "court": "Court Name", "date": "Date Filed or Decided", "docket": "Docket Number if available", "content": "The FULL detailed text of the opinion, verdict, or legal document. For list requests, provide a concise summary of each case as visible on the search results page."}]. Always return valid JSON array syntax in extractedData
-- CRITICAL RULE FOR PDFS: When you navigate to a PDF view, or if you see a button/link that says "Download PDF" or "Your browser does not support embedded PDF viewing", you MUST NEVER use the "done" action. You MUST use the "extract" action IMMEDIATELY. Do not worry about reading the PDF yourself; simply trigger "extract" and our backend Harvester will securely download and analyze the file.
-- CRITICAL: If the user's goal involves extracting, summarizing, or reading a case, you are FORBIDDEN from using the "done" action. You MUST use the "extract" action. The backend Harvester handles all PDF downloading and analysis — you just need to trigger "extract".
+- UNIVERSAL EXTRACT RULE: Your only job as the navigator is to reach the final page containing the requested case, article, video, or document. The MOMENT you are on the correct target page, you MUST IMMEDIATELY use the "extract" action and stop navigating. DO NOT try to read the document yourself, and DO NOT try to click into specific PDF viewers or sub-tabs unless strictly necessary to reveal the page. Just get to the main page of the document/video and trigger "extract". Our universal backend will automatically detect if there is a PDF to download, a video to transcribe, or text to scrape, and will perform the deep analysis.
+- EXCEPTION FOR LISTS: If the user's goal explicitly asks for a LIST or MULTIPLE items (e.g., "5 lawsuits", "latest cases", "recent articles"), you ARE ALLOWED to use the "extract" action directly on the search results page without clicking into individual items.
+- WRONG PAGE RULE: If you realize you are on the WRONG page, DO NOT use "extract". Use "click" to go back or "type" to search again. "extract" is ONLY for the correct target page.
+- EXTRACTION FORMAT: When using "extract", structure the extractedData as a JSON array: [{"title": "Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Summary text"}]. Always return valid JSON array syntax.
+- CRITICAL: If the user's goal involves extracting, summarizing, reading, or analyzing any content, you are FORBIDDEN from using the "done" action. You MUST use "extract" instead. The backend handles all document processing — you just trigger "extract".
 - Use "done" ONLY when the user's goal strictly asks to navigate somewhere without needing a summary, report, or data extraction.
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical
@@ -402,13 +401,28 @@ export async function runAgentLoop(
         try {
           const pdfUrl = await page.evaluate(() => {
             const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => a.innerText.toLowerCase().includes('download pdf'));
-            if (downloadBtn && downloadBtn.href) return downloadBtn.href;
+            if (downloadBtn && (downloadBtn as HTMLAnchorElement).href) return (downloadBtn as HTMLAnchorElement).href;
 
             const pdfTab = Array.from(document.querySelectorAll('a')).find(a => a.innerText.trim().toLowerCase() === 'pdf');
-            if (pdfTab && pdfTab.href) return pdfTab.href;
+            if (pdfTab && (pdfTab as HTMLAnchorElement).href) return (pdfTab as HTMLAnchorElement).href;
 
-            const dlLink = document.querySelector('a[href$=".pdf"], a[href*=".pdf"]') as HTMLAnchorElement | null;
-            if (dlLink) return dlLink.href;
+            const exactPdf = document.querySelector('a[href$=".pdf"]') as HTMLAnchorElement | null;
+            if (exactPdf) return exactPdf.href;
+
+            const anyPdfLink = document.querySelector('a[href*=".pdf"], a[href*="PDF"]') as HTMLAnchorElement | null;
+            if (anyPdfLink) return anyPdfLink.href;
+
+            const dropdownPdf = document.querySelector('div.dropdown-menu a[href*=".pdf"], ul.dropdown-menu a[href*=".pdf"]') as HTMLAnchorElement | null;
+            if (dropdownPdf) return dropdownPdf.href;
+
+            const embed = document.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]') as HTMLEmbedElement | null;
+            if (embed?.src) return embed.src;
+
+            const iframe = document.querySelector('iframe[src*=".pdf"]') as HTMLIFrameElement | null;
+            if (iframe?.src) return iframe.src;
+
+            const obj = document.querySelector('object[data*=".pdf"]') as HTMLObjectElement | null;
+            if (obj?.data) return obj.data;
 
             return null;
           });
