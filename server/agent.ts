@@ -171,7 +171,7 @@ Return ONLY a JSON object with NO markdown formatting, code fences, or extra tex
 
 Rules:
 - Use "click" to click on a numbered element
-- Use "type" to click a numbered input field and type text into it
+- Use "type" to click a numbered input field and type text into it. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
 - Use "scroll" to scroll down the page (no targetNumber needed)
 - CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases UNLESS the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases", "last 10", "recent filings"). For single-case goals, you MUST click the link to enter the specific case document first. Only use "extract" when you are inside the actual full text of the CORRECT target document.
 - EXCEPTION TO EXTRACT RULE: If the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases"), you ARE ALLOWED to use the "extract" action directly on the search results page. You do not need to click into individual cases for list requests. Extract all visible matching cases from the results.
@@ -448,7 +448,7 @@ export async function runAgentLoop(
             const pdfBase64 = pdfBuffer.toString("base64");
             const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this provided PDF court document. If the user asked for a summary, write a highly professional, comprehensive 3-paragraph legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects in the array.`;
             const lawyerResponse = await ai.models.generateContent({
-              model: "gemini-2.5-flash-preview-05-20",
+              model: "gemini-1.5-flash",
               contents: [{
                 role: "user",
                 parts: [
@@ -481,7 +481,7 @@ export async function runAgentLoop(
               log(`Lawyer: sending ${fullText.length} chars of page text to Gemini.`, "agent");
               const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this webpage text. Write a highly professional, comprehensive 3-paragraph legal summary (Background, Core Issues, Verdict/Precedents). Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
               const lawyerResponse = await ai.models.generateContent({
-                model: "gemini-2.5-flash-preview-05-20",
+                model: "gemini-1.5-flash",
                 contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
               });
               let lawyerText = lawyerResponse.text?.trim() || "";
