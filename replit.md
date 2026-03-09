@@ -36,6 +36,7 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 - **Legal Brief View**: When a `report` WebSocket message is received, the screenshot viewer is replaced with a styled "Citadelle Legal Brief" card rendering the markdown content
 - **Downloads**: .txt (full brief) and .csv (mock case data) download buttons on the legal brief card
 - **Text-to-Speech**: Uses `speechSynthesis` to announce when extraction/investigation is complete
+- **Voice Activity Detection (VAD)**: AudioContext + AnalyserNode monitors microphone volume in real-time. Auto-stops recording after 1.5s of silence once speech is detected. Shows reactive volume pulse and auto-submit indicator
 - **Session Reset**: "New Mission" button appears after run completion to clear state and return to mic view
 
 ## Environment Variables

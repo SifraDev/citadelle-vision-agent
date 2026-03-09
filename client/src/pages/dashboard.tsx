@@ -19,7 +19,6 @@ import {
   Info,
   ChevronRight,
   Mic,
-  MicOff,
   Download,
   FileText,
   Shield,
@@ -204,12 +203,24 @@ export default function Dashboard() {
   } = useAgentWebSocket();
 
   const [isRecording, setIsRecording] = useState(false);
+  const [isAutoStopping, setIsAutoStopping] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [volumeLevel, setVolumeLevel] = useState(0);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const silenceStartRef = useRef<number | null>(null);
+  const hasSpokenRef = useRef(false);
+  const stoppingRef = useRef(false);
+  const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const SILENCE_THRESHOLD = 12;
+  const SILENCE_DURATION_MS = 1500;
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -218,14 +229,48 @@ export default function Dashboard() {
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch {}
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        try { mediaRecorderRef.current.stop(); } catch {}
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
       }
     };
   }, []);
 
+  const cleanupAudio = useCallback(() => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close(); } catch {}
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    silenceStartRef.current = null;
+    hasSpokenRef.current = false;
+    setVolumeLevel(0);
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    cleanupAudio();
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, [cleanupAudio]);
+
   const startRecording = useCallback(async () => {
     try {
+      stoppingRef.current = false;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -255,38 +300,91 @@ export default function Dashboard() {
         streamRef.current = null;
 
         const blob = new Blob(chunksRef.current, { type: mimeType });
-        if (blob.size < 1000) return;
+        if (blob.size < 1000) {
+          setIsAutoStopping(false);
+          return;
+        }
 
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = (reader.result as string).split(",")[1];
-          if (base64) {
-            const simpleMime = mimeType.split(";")[0];
-            sendAudioCommand(base64, simpleMime);
-          }
-        };
-        reader.readAsDataURL(blob);
+        setIsAutoStopping(true);
+        sendTimeoutRef.current = setTimeout(() => {
+          sendTimeoutRef.current = null;
+          setIsAutoStopping(false);
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64 = (reader.result as string).split(",")[1];
+            if (base64) {
+              const simpleMime = mimeType.split(";")[0];
+              sendAudioCommand(base64, simpleMime);
+            }
+          };
+          reader.readAsDataURL(blob);
+        }, 600);
       };
 
       mediaRecorderRef.current = recorder;
       recorder.start(250);
       setIsRecording(true);
       setRecordingDuration(0);
+      hasSpokenRef.current = false;
+      silenceStartRef.current = null;
 
       timerRef.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
-    } catch {
-      setIsRecording(false);
-    }
-  }, [sendAudioCommand]);
 
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.3;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const monitorVolume = () => {
+        if (!analyserRef.current || stoppingRef.current) return;
+
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setVolumeLevel(Math.min(avg / 80, 1));
+
+        if (avg > SILENCE_THRESHOLD) {
+          hasSpokenRef.current = true;
+          silenceStartRef.current = null;
+        } else if (hasSpokenRef.current) {
+          if (!silenceStartRef.current) {
+            silenceStartRef.current = Date.now();
+          } else if (Date.now() - silenceStartRef.current >= SILENCE_DURATION_MS) {
+            stopRecording();
+            return;
+          }
+        }
+
+        rafRef.current = requestAnimationFrame(monitorVolume);
+      };
+
+      rafRef.current = requestAnimationFrame(monitorVolume);
+    } catch {
+      cleanupAudio();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      mediaRecorderRef.current = null;
+      setIsRecording(false);
+      setRecordingDuration(0);
     }
-    setIsRecording(false);
-  }, []);
+  }, [sendAudioCommand, stopRecording, cleanupAudio]);
 
   const toggleRecording = useCallback(() => {
     if (isRecording) {
@@ -299,9 +397,15 @@ export default function Dashboard() {
   const showBrief = !!reportData;
 
   const resetSession = useCallback(() => {
+    if (sendTimeoutRef.current) {
+      clearTimeout(sendTimeoutRef.current);
+      sendTimeoutRef.current = null;
+    }
     clearSession();
     setIsRecording(false);
+    setIsAutoStopping(false);
     setRecordingDuration(0);
+    setVolumeLevel(0);
   }, [clearSession]);
 
   const formatDuration = (seconds: number) => {
@@ -396,41 +500,55 @@ export default function Dashboard() {
             ) : (
               <div className="flex flex-col items-center justify-center h-full gap-6">
                 <div className="relative">
+                  {isRecording && (
+                    <div
+                      className="absolute inset-0 rounded-full bg-red-500/10 transition-transform duration-100"
+                      style={{ transform: `scale(${1 + volumeLevel * 0.6})` }}
+                    />
+                  )}
+
+                  {isAutoStopping && (
+                    <div className="absolute inset-0 rounded-full bg-emerald-400/20 animate-ping" />
+                  )}
+
                   <button
                     data-testid="button-jarvis-mic"
                     onClick={toggleRecording}
-                    disabled={agentState === "running" || !connected}
+                    disabled={agentState === "running" || !connected || isAutoStopping}
                     className={`
                       relative z-10 w-32 h-32 rounded-full flex items-center justify-center
                       transition-all duration-300 cursor-pointer
                       disabled:opacity-40 disabled:cursor-not-allowed
-                      ${isRecording
-                        ? "bg-red-500/20 border-2 border-red-400 shadow-[0_0_40px_rgba(239,68,68,0.3)]"
-                        : "bg-sky-500/10 border-2 border-sky-500/30 hover:border-sky-400 hover:bg-sky-500/20 hover:shadow-[0_0_40px_rgba(56,189,248,0.2)]"
+                      ${isAutoStopping
+                        ? "bg-emerald-500/20 border-2 border-emerald-400 shadow-[0_0_40px_rgba(52,211,153,0.3)]"
+                        : isRecording
+                          ? "bg-red-500/20 border-2 border-red-400 shadow-[0_0_40px_rgba(239,68,68,0.3)]"
+                          : "bg-sky-500/10 border-2 border-sky-500/30 hover:border-sky-400 hover:bg-sky-500/20 hover:shadow-[0_0_40px_rgba(56,189,248,0.2)]"
                       }
                     `}
                   >
-                    {isRecording ? (
-                      <MicOff className="w-12 h-12 text-red-400" />
+                    {isAutoStopping ? (
+                      <Zap className="w-12 h-12 text-emerald-400 animate-pulse" />
+                    ) : isRecording ? (
+                      <Mic className="w-12 h-12 text-red-400" />
                     ) : (
                       <Mic className="w-12 h-12 text-sky-400" />
                     )}
                   </button>
 
-                  {isRecording && (
-                    <>
-                      <div className="absolute inset-0 rounded-full border-2 border-red-400/30 animate-ping" />
-                      <div className="absolute -inset-3 rounded-full border border-red-400/10 animate-pulse" />
-                    </>
+                  {isRecording && !isAutoStopping && (
+                    <div className="absolute -inset-3 rounded-full border border-red-400/10 animate-pulse" />
                   )}
                 </div>
 
                 <div className="text-center max-w-md">
-                  {isRecording ? (
+                  {isAutoStopping ? (
+                    <p className="text-sm font-medium text-emerald-400 animate-pulse">Sending to Gemini...</p>
+                  ) : isRecording ? (
                     <>
-                      <p className="text-sm font-medium text-red-400 animate-pulse">Recording... {formatDuration(recordingDuration)}</p>
+                      <p className="text-sm font-medium text-red-400">Recording... {formatDuration(recordingDuration)}</p>
                       <p className="text-xs text-muted-foreground/60 mt-2">
-                        Tap again to stop and send to Gemini
+                        Speak naturally — auto-stops when you finish
                       </p>
                     </>
                   ) : (
