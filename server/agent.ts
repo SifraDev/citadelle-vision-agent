@@ -173,9 +173,10 @@ Rules:
 - Use "click" to click on a numbered element
 - Use "type" to click a numbered input field and type text into it
 - Use "scroll" to scroll down the page (no targetNumber needed)
-- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases. You MUST click the link to enter the specific case document/article first. Only use "extract" when you are inside the actual full text of the CORRECT target document.
+- CRITICAL RULE FOR EXTRACT: You are strictly FORBIDDEN from using the "extract" action on a search engine results page or a list of cases UNLESS the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases", "last 10", "recent filings"). For single-case goals, you MUST click the link to enter the specific case document first. Only use "extract" when you are inside the actual full text of the CORRECT target document.
+- EXCEPTION TO EXTRACT RULE: If the user's goal explicitly asks for a LIST or MULTIPLE cases (e.g., "5 lawsuits", "latest cases"), you ARE ALLOWED to use the "extract" action directly on the search results page. You do not need to click into individual cases for list requests. Extract all visible matching cases from the results.
 - WRONG PAGE RULE: If you realize you are on the WRONG case or page, DO NOT use the "extract" action to try and escape or summarize what you see. You must use "click" to go back, or "type" to search again. The "extract" action is ONLY for when you are looking at the correct target document that matches the user's goal.
-- CRITICAL EXTRACTION FORMAT: When using the "extract" action, DO NOT dump raw page text. You must intelligently extract the case(s) into a structured JSON array format inside the extractedData string. Use this exact format: [{"title": "Full Case Name v. Party", "court": "Court Name", "date": "Date Filed or Decided", "docket": "Docket Number if available", "content": "The FULL detailed text of the opinion, verdict, or legal document. Be comprehensive and include all substantive content visible on the screen."}]. Always return valid JSON array syntax in extractedData
+- CRITICAL EXTRACTION FORMAT: When using the "extract" action, DO NOT dump raw page text. You must intelligently extract the case(s) into a structured JSON array format inside the extractedData string. Use this exact format: [{"title": "Full Case Name v. Party", "court": "Court Name", "date": "Date Filed or Decided", "docket": "Docket Number if available", "content": "The FULL detailed text of the opinion, verdict, or legal document. For list requests, provide a concise summary of each case as visible on the search results page."}]. Always return valid JSON array syntax in extractedData
 - Use "done" when the goal appears to be accomplished
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical
@@ -373,11 +374,17 @@ export async function runAgentLoop(
           /^\/search/.test(pathname) ||
           /^\/results/.test(pathname) ||
           /^\/find\b/.test(pathname);
-        if (isSearchPage) {
+        const listKeywords = /\d+\s*(lawsuits?|cases?|filings?|opinions?|results?)|last\s+\d+|latest|recent|list\s+of|find\s+all|multiple/i;
+        const isListGoal = listKeywords.test(goal);
+
+        if (isSearchPage && !isListGoal) {
           log(`Extract blocked: page appears to be a search/results page (${currentUrl}). Forcing navigation.`, "agent");
           send({ type: "log", message: "Extraction blocked — still on search results. Navigating to the actual document..." });
           action.action = "scroll";
           continue;
+        }
+        if (isSearchPage && isListGoal) {
+          log(`Extract allowed on search page: goal requests a list of cases.`, "agent");
         }
 
         await removeMarkers(page);
