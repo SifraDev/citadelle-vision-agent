@@ -399,6 +399,46 @@ export async function runAgentLoop(
 
         let pdfBuffer: Buffer | null = null;
         try {
+          try {
+            const clickedTab = await page.evaluate(() => {
+              const pdfTab = Array.from(document.querySelectorAll('a, button')).find(el => {
+                const text = (el.textContent || "").trim().toLowerCase();
+                return text === 'pdf' || text === 'view pdf' || text === 'download pdf';
+              }) as HTMLElement | undefined;
+              if (pdfTab) {
+                pdfTab.click();
+                return pdfTab.textContent?.trim() || "PDF element";
+              }
+              return null;
+            });
+            if (clickedTab) {
+              log(`Harvester: clicked "${clickedTab}" tab/button to reveal PDF links.`, "agent");
+              await page.waitForTimeout(1500);
+            }
+          } catch (tabErr: any) {
+            log(`Harvester: tab click attempt skipped: ${tabErr.message}`, "agent");
+          }
+
+          try {
+            const clickedDropdown = await page.evaluate(() => {
+              const dropdownToggle = Array.from(document.querySelectorAll('button, a, [data-toggle="dropdown"]')).find(el => {
+                const text = (el.textContent || "").trim().toLowerCase();
+                return text.includes('download') && (text.includes('pdf') || text.includes('document'));
+              }) as HTMLElement | undefined;
+              if (dropdownToggle) {
+                dropdownToggle.click();
+                return dropdownToggle.textContent?.trim() || "Download button";
+              }
+              return null;
+            });
+            if (clickedDropdown) {
+              log(`Harvester: opened "${clickedDropdown}" dropdown to reveal PDF links.`, "agent");
+              await page.waitForTimeout(1000);
+            }
+          } catch (dropErr: any) {
+            log(`Harvester: dropdown click attempt skipped: ${dropErr.message}`, "agent");
+          }
+
           const pdfUrl = await page.evaluate(() => {
             const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => (a.innerText || "").toLowerCase().includes('download pdf'));
             if (downloadBtn && (downloadBtn as HTMLAnchorElement).href) return (downloadBtn as HTMLAnchorElement).href;
@@ -412,7 +452,7 @@ export async function runAgentLoop(
             const anyPdfLink = document.querySelector('a[href*=".pdf"], a[href*="PDF"]') as HTMLAnchorElement | null;
             if (anyPdfLink) return anyPdfLink.href;
 
-            const dropdownPdf = document.querySelector('div.dropdown-menu a[href*=".pdf"], ul.dropdown-menu a[href*=".pdf"]') as HTMLAnchorElement | null;
+            const dropdownPdf = document.querySelector('div.dropdown-menu a[href*=".pdf"], ul.dropdown-menu a[href*=".pdf"], .dropdown-menu a[href*=".pdf"]') as HTMLAnchorElement | null;
             if (dropdownPdf) return dropdownPdf.href;
 
             const embed = document.querySelector('embed[type="application/pdf"], embed[src*=".pdf"]') as HTMLEmbedElement | null;
@@ -434,8 +474,13 @@ export async function runAgentLoop(
             const response = await page.request.get(pdfUrl);
             const body = await response.body();
             if (body && body.length > 500) {
-              pdfBuffer = body;
-              log(`Harvester: downloaded PDF (${(body.length / 1024).toFixed(1)} KB).`, "agent");
+              const headerChunk = body.slice(0, 1024).toString("ascii");
+              if (headerChunk.includes("%PDF")) {
+                pdfBuffer = body;
+                log(`Harvester: valid PDF confirmed (${(body.length / 1024).toFixed(1)} KB).`, "agent");
+              } else {
+                log(`Harvester: downloaded file is not a valid PDF. Falling back to text.`, "agent");
+              }
             } else {
               log(`Harvester: PDF response too small (${body?.length || 0} bytes).`, "agent");
             }
