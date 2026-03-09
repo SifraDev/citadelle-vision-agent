@@ -400,6 +400,12 @@ export async function runAgentLoop(
         let pdfBuffer: Buffer | null = null;
         try {
           const pdfUrl = await page.evaluate(() => {
+            const exactPdf = document.querySelector('a[href$=".pdf"]') as HTMLAnchorElement | null;
+            if (exactPdf) return exactPdf.href;
+
+            const dropdownPdf = document.querySelector('div.dropdown-menu a[href*=".pdf"]') as HTMLAnchorElement | null;
+            if (dropdownPdf) return dropdownPdf.href;
+
             const dlLink = document.querySelector('a[href*=".pdf"]') as HTMLAnchorElement | null;
             if (dlLink) return dlLink.href;
 
@@ -446,7 +452,7 @@ export async function runAgentLoop(
           log(`Lawyer: sending PDF (${(pdfBuffer.length / 1024).toFixed(1)} KB) to Gemini for analysis.`, "agent");
           try {
             const pdfBase64 = pdfBuffer.toString("base64");
-            const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this provided PDF court document. If the user asked for a summary, write a highly professional, comprehensive 3-paragraph legal summary of the case (Background, Core Issues, Verdict/Precedents). If they asked for a list, extract the list details. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects in the array.`;
+            const lawyerPrompt = `You are a Senior Legal Partner. The user's goal is: "${goal}". Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown and NO code blocks: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your summary including important points and contradictions here"}]. For list requests, return multiple objects in the array.`;
             const lawyerResponse = await ai.models.generateContent({
               model: "gemini-1.5-flash",
               contents: [{
