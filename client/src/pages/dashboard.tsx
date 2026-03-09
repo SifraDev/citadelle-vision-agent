@@ -373,7 +373,7 @@ export default function Dashboard() {
   const sendTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const SILENCE_THRESHOLD = 25;
-  const SILENCE_DURATION_MS = 1000;
+  const SILENCE_DURATION_MS = 2500;
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
