@@ -22,6 +22,7 @@ import {
   Download,
   FileText,
   Shield,
+  PlayCircle,
 } from "lucide-react";
 
 function LogIcon({ type }: { type: AgentLog["type"] }) {
@@ -134,6 +135,7 @@ function escHtml(s: string): string {
 function generateReportHtml(cases: CaseData[], goal: string, fallbackText: string | null): string {
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const isMultiCase = cases.length > 1;
+  const isVideo = cases.some(c => c.court?.startsWith("Channel:"));
   const caseCardsHtml = cases.map((c, i) => `
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:32px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
       ${isMultiCase ? `<div style="margin-bottom:12px;"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:4px 12px;border-radius:20px;${i === 0 ? 'background:#f0f9ff;color:#0284c7;' : 'background:#fffbeb;color:#d97706;'}">${i === 0 ? 'Primary Case' : `Precedent ${i}`}</span></div>` : ''}
@@ -178,7 +180,7 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
 <div style="background:#0B132B;padding:48px 32px 40px;text-align:center;">
   <div style="font-size:13px;letter-spacing:6px;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:8px;">Intelligence Division</div>
   <h1 style="font-size:36px;font-weight:800;color:#ffffff;letter-spacing:2px;margin-bottom:6px;">CITADELLE</h1>
-  <p style="font-size:16px;color:rgba(255,255,255,0.6);margin-bottom:20px;">${isMultiCase ? 'Precedent Research Report' : 'Legal Research Report'}</p>
+  <p style="font-size:16px;color:rgba(255,255,255,0.6);margin-bottom:20px;">${isMultiCase ? 'Precedent Research Report' : isVideo ? 'Video Analysis Report' : 'Legal Research Report'}</p>
   <div style="font-size:13px;color:rgba(255,255,255,0.35);">Generated ${dateStr}</div>
 </div>
 <div style="max-width:800px;margin:0 auto;padding:32px 24px 64px;">
@@ -187,7 +189,7 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
     <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#0284c7;font-weight:600;margin-bottom:6px;">Research Query</div>
     <div style="font-size:15px;color:#0c4a6e;font-weight:500;">${escHtml(goal)}</div>
   </div>` : ""}
-  <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600;margin-bottom:16px;">${isMultiCase ? `Precedent Research — ${cases.length} Cases` : `Extracted Cases (${cases.length || 1})`}</div>
+  <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600;margin-bottom:16px;">${isMultiCase ? `Precedent Research — ${cases.length} Cases` : isVideo ? 'Video Summary' : `Extracted Cases (${cases.length || 1})`}</div>
   ${cases.length > 0 ? caseCardsHtml : fallbackHtml}
   <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
     Citadelle Intelligence &mdash; Automated Legal Research Platform
@@ -224,7 +226,7 @@ function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal:
         spacing: { after: 100 },
       }),
       new Paragraph({
-        children: [new TextRun({ text: "Legal Research Report", size: 24, font: "Calibri", color: "666666" })],
+        children: [new TextRun({ text: cases.some(c => c.court?.startsWith("Channel:")) ? "Video Analysis Report" : cases.length > 1 ? "Precedent Research Report" : "Legal Research Report", size: 24, font: "Calibri", color: "666666" })],
         alignment: AlignmentType.CENTER,
         spacing: { after: 100 },
       }),
@@ -316,7 +318,7 @@ function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal:
         <div className="max-w-3xl mx-auto">
           <p className="text-[11px] uppercase tracking-[4px] text-white/30 mb-1">Intelligence Division</p>
           <h1 className="text-2xl font-extrabold text-white tracking-wider mb-1">CITADELLE</h1>
-          <p className="text-sm text-white/50 mb-2">{cases.length > 1 ? 'Precedent Research Report' : 'Legal Research Report'}</p>
+          <p className="text-sm text-white/50 mb-2">{cases.length > 1 ? 'Precedent Research Report' : cases.some(c => c.court?.startsWith("Channel:")) ? 'Video Analysis Report' : 'Legal Research Report'}</p>
           <p className="text-xs text-white/25">Generated {dateStr}</p>
         </div>
       </div>
@@ -352,15 +354,22 @@ function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal:
                   <div className="flex-1 min-w-0">
                     <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug">{c.title || `Case ${i + 1}`}</h3>
                     <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5">
-                      {c.court && <span className="text-xs text-slate-500 dark:text-slate-400">{c.court}</span>}
+                      {c.court && <span className="text-xs text-slate-500 dark:text-slate-400">{c.court?.startsWith("Channel:") ? c.court : c.court}</span>}
                       {c.date && <span className="text-xs text-slate-500 dark:text-slate-400">{c.date}</span>}
                       {c.docket && <span className="text-xs text-slate-500 dark:text-slate-400">Docket: {c.docket}</span>}
                     </div>
                   </div>
-                  <Badge className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 text-[10px] shrink-0">
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    Extracted
-                  </Badge>
+                  {c.court?.startsWith("Channel:") ? (
+                    <Badge className="bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-500/20 text-[10px] shrink-0">
+                      <PlayCircle className="w-3 h-3 mr-1" />
+                      Video
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-500/20 text-[10px] shrink-0">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      Extracted
+                    </Badge>
+                  )}
                 </div>
                 <Separator className="bg-slate-100 dark:bg-slate-800 mb-4" />
                 <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-[500px] overflow-y-auto pr-2">

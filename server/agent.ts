@@ -420,11 +420,87 @@ export async function runAgentLoop(
           continue;
         }
 
-        send({ type: "status", message: "Searching for PDF document..." });
-        log(`Harvester: looking for embedded PDF on page.`, "agent");
+        const isYouTube = /youtube\.com\/watch|youtu\.be\//i.test(pageUrlNow);
+        let videoTranscript: string | null = null;
+        let videoTitle: string | null = null;
+        let videoChannel: string | null = null;
+        let videoDate: string | null = null;
+
+        if (isYouTube) {
+          send({ type: "status", message: "Extracting video transcript..." });
+          log(`Harvester: YouTube video detected. Extracting transcript.`, "agent");
+          try {
+            const captionData = await page.evaluate(() => {
+              const title = document.querySelector('h1.ytd-watch-metadata yt-formatted-string, h1.title')?.textContent?.trim()
+                || document.title.replace(/ - YouTube$/, '').trim();
+              const channel = document.querySelector('#channel-name a, #owner #text a, ytd-channel-name a')?.textContent?.trim() || "";
+              const date = document.querySelector('#info-strings yt-formatted-string, #upload-info span')?.textContent?.trim() || "";
+
+              const scripts = Array.from(document.querySelectorAll('script'));
+              for (const script of scripts) {
+                const text = script.textContent || "";
+                if (text.includes('captionTracks')) {
+                  const match = text.match(/"captionTracks":\s*(\[[\s\S]*?\])/);
+                  if (match) {
+                    try {
+                      const tracks = JSON.parse(match[1]);
+                      if (tracks.length > 0) {
+                        const enTrack = tracks.find((t: any) => t.languageCode === 'en') || tracks[0];
+                        return { title, channel, date, captionUrl: enTrack.baseUrl };
+                      }
+                    } catch {}
+                  }
+                }
+              }
+              return { title, channel, date, captionUrl: null };
+            });
+
+            videoTitle = captionData.title;
+            videoChannel = captionData.channel;
+            videoDate = captionData.date;
+
+            if (captionData.captionUrl) {
+              log(`Harvester: found caption track URL. Fetching transcript.`, "agent");
+              try {
+                const captionResp = await page.request.get(captionData.captionUrl);
+                const captionXml = await captionResp.text();
+                const textSegments = captionXml.match(/<text[^>]*>([\s\S]*?)<\/text>/g);
+                if (textSegments && textSegments.length > 0) {
+                  videoTranscript = textSegments
+                    .map(seg => {
+                      const content = seg.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+                      return content;
+                    })
+                    .filter(Boolean)
+                    .join(' ');
+                  log(`Harvester: extracted ${videoTranscript.length} chars of transcript.`, "agent");
+                }
+              } catch (captErr: any) {
+                log(`Harvester: caption fetch failed: ${captErr.message}`, "agent");
+              }
+            }
+
+            if (!videoTranscript) {
+              log(`Harvester: no captions available. Trying page description/text.`, "agent");
+              const pageText = await page.evaluate(() => {
+                const desc = document.querySelector('#description-inline-expander, #description, ytd-text-inline-expander')?.textContent?.trim() || "";
+                return desc;
+              });
+              if (pageText && pageText.length > 50) {
+                videoTranscript = pageText;
+                log(`Harvester: using video description (${pageText.length} chars) as fallback.`, "agent");
+              }
+            }
+          } catch (ytErr: any) {
+            log(`Harvester: YouTube extraction error: ${ytErr.message}`, "agent");
+          }
+        }
+
+        send({ type: "status", message: isYouTube ? "Analyzing video content..." : "Searching for PDF document..." });
+        log(isYouTube ? `Harvester: proceeding with video analysis.` : `Harvester: looking for embedded PDF on page.`, "agent");
 
         let pdfBuffer: Buffer | null = null;
-        try {
+        if (!isYouTube) try {
           const pdfUrl = await page.evaluate(() => {
             const pdfTab = Array.from(document.querySelectorAll('a')).find(a => {
               const text = (a.innerText || "").trim().toLowerCase();
@@ -539,7 +615,53 @@ export async function runAgentLoop(
 
         let lawyerOutput = action.extractedData || "";
 
-        if (pdfBuffer) {
+        if (isYouTube && videoTranscript) {
+          send({ type: "status", message: "Analyzing video content..." });
+          log(`Analyst: sending ${videoTranscript.length} chars of transcript to Gemini.`, "agent");
+          try {
+            const videoPrompt = `You are an expert content analyst and researcher. The user's goal is: "${goal}". Read this YouTube video transcript and write a comprehensive, well-structured summary. Cover: Key Points and Main Arguments, Important Details and Examples, Conclusions and Takeaways. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "${videoTitle || "Video Title"}", "court": "Channel: ${videoChannel || "Unknown"}", "date": "${videoDate || ""}", "docket": "", "content": "Your comprehensive summary here"}].\n\nVideo transcript:\n${videoTranscript.slice(0, 30000)}`;
+            const analystResponse = await ai.models.generateContent({
+              model: "gemini-2.5-flash-lite",
+              contents: [{ role: "user", parts: [{ text: videoPrompt }] }],
+            });
+            let analystText = analystResponse.text?.trim() || "";
+            analystText = analystText
+              .replace(/^```(?:json)?\s*/i, "")
+              .replace(/\s*```\s*$/, "")
+              .trim();
+            if (analystText.length > 50 && analystText.includes("[")) {
+              lawyerOutput = analystText;
+              log(`Analyst: produced ${analystText.length} char video analysis.`, "agent");
+            }
+          } catch (e: any) {
+            log(`Video analysis failed: ${e.message}`, "agent");
+          }
+        } else if (isYouTube && !videoTranscript) {
+          send({ type: "status", message: "No transcript found. Analyzing visible page content..." });
+          log(`Harvester: no transcript available, falling back to page text.`, "agent");
+          try {
+            let fullText = await page.evaluate(() => document.body.innerText);
+            fullText = fullText.replace(/\t/g, " ").replace(/\n{3,}/g, "\n\n").replace(/ {2,}/g, " ").trim();
+            if (fullText.length > 200) {
+              const videoPrompt = `You are an expert content analyst. The user's goal is: "${goal}". This is text from a YouTube video page (no transcript was available). Summarize whatever information is visible (title, description, comments). Return ONLY a valid JSON array: [{"title": "${videoTitle || "Video"}", "court": "Channel: ${videoChannel || "Unknown"}", "date": "${videoDate || ""}", "docket": "", "content": "Your summary here"}].\n\nPage text:\n${fullText.slice(0, 30000)}`;
+              const analystResponse = await ai.models.generateContent({
+                model: "gemini-2.5-flash-lite",
+                contents: [{ role: "user", parts: [{ text: videoPrompt }] }],
+              });
+              let analystText = analystResponse.text?.trim() || "";
+              analystText = analystText
+                .replace(/^```(?:json)?\s*/i, "")
+                .replace(/\s*```\s*$/, "")
+                .trim();
+              if (analystText.length > 50 && analystText.includes("[")) {
+                lawyerOutput = analystText;
+                log(`Analyst: produced ${analystText.length} char page text analysis.`, "agent");
+              }
+            }
+          } catch (e: any) {
+            log(`YouTube page text fallback failed: ${e.message}`, "agent");
+          }
+        } else if (pdfBuffer) {
           send({ type: "status", message: "Legal analyst reading PDF document..." });
           log(`Lawyer: sending PDF (${(pdfBuffer.length / 1024).toFixed(1)} KB) to Gemini for analysis.`, "agent");
           try {

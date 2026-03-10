@@ -30,8 +30,47 @@ export async function parseAudioCommand(audioBase64: string, mimeType: string): 
   }
 
   const parsed = JSON.parse(jsonMatch[0]);
+
+  const SITE_MAP: Record<string, string> = {
+    youtube: "https://www.youtube.com",
+    wikipedia: "https://www.wikipedia.org",
+    reddit: "https://www.reddit.com",
+    twitter: "https://www.twitter.com",
+    github: "https://www.github.com",
+    courtlistener: "https://www.courtlistener.com",
+    "court listener": "https://www.courtlistener.com",
+    google: "https://www.google.com",
+    linkedin: "https://www.linkedin.com",
+    stackoverflow: "https://stackoverflow.com",
+    "stack overflow": "https://stackoverflow.com",
+  };
+
+  let resolvedUrl = (parsed.url || "").trim();
+  if (resolvedUrl && !resolvedUrl.startsWith("http")) {
+    const lower = resolvedUrl.toLowerCase().replace(/[.\s]/g, "");
+    let matched = false;
+    for (const [name, url] of Object.entries(SITE_MAP)) {
+      if (lower.includes(name.replace(/\s/g, ""))) {
+        resolvedUrl = url;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      const cleaned = resolvedUrl.replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase();
+      if (cleaned.length > 0 && cleaned.length < 50 && /^[a-z0-9]/.test(cleaned)) {
+        resolvedUrl = `https://www.${cleaned.includes(".") ? cleaned : cleaned + ".com"}`;
+      } else {
+        resolvedUrl = "https://www.google.com";
+      }
+    }
+  }
+  if (!resolvedUrl || !resolvedUrl.startsWith("http")) {
+    resolvedUrl = "https://www.google.com";
+  }
+
   return {
-    url: parsed.url || "",
+    url: resolvedUrl,
     goal: parsed.goal || "",
   };
 }

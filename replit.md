@@ -41,6 +41,21 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 - Report header changes to "Precedent Research Report" when multiple cases are present
 - HTML full report and DOCX export also include precedent labels
 
+## YouTube Video Summarization
+
+- Detected when page URL matches `youtube.com/watch` or `youtu.be/`
+- Transcript extraction: parses `captionTracks` from `ytInitialPlayerResponse` in page scripts, fetches XML captions, converts to plain text
+- Falls back to video description/page text if no captions available
+- Uses content analyst prompt (not legal) with Key Points, Details, and Conclusions structure
+- Output uses `court` field as "Channel: [name]" to distinguish from legal content
+- Frontend shows red "Video" badge with PlayCircle icon for video content; header shows "Video Analysis Report"
+
+## Smart URL Resolution
+
+- Post-processes AI output in `jarvis-parser.ts` with a lookup map for common sites
+- Handles partial names without TLD (e.g., "YouTube" → "https://www.youtube.com")
+- Falls back to constructing `https://www.[name].com` for unknown sites
+
 ## Frontend Features
 
 - **Jarvis Voice UI**: Single large microphone button — no typing required. Records raw audio via MediaRecorder API and sends base64-encoded audio to the backend
