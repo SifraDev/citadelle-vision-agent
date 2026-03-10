@@ -16,7 +16,7 @@ export async function parseAudioCommand(audioBase64: string, mimeType: string): 
       role: "user",
       parts: [
         { inlineData: { data: audioBase64, mimeType } },
-        { text: 'Listen to this voice command for a web automation agent. Extract the target URL and the goal. Return ONLY JSON with no markdown or code fences: {"url": "https://...", "goal": "..."}. If the user mentions a website name, construct the full URL (e.g., "courtlistener" becomes "https://www.courtlistener.com", "oyez" becomes "https://www.oyez.org", "google scholar" or "scholar" becomes "https://scholar.google.com"). Default URL to https://www.google.com if no domain is specified. CRITICAL: NEVER hallucinate, guess, or construct deep links (e.g., /opinion/123/case-name). You MUST ONLY return the root base URL of the domain (e.g., "https://www.courtlistener.com", "https://www.wikipedia.org"). Put all the specific search terms, case names, and instructions into the goal field so the visual agent performs the search manually. If the audio sounds like "strat", "straight", or "track" in the context of getting or reading a case, assume the user meant the word "extract". CRITICAL: Listen to the audio carefully. If the audio contains only silence, background noise, static, or unintelligible sounds, you MUST return a JSON object with empty values: {"url": "", "goal": ""}. DO NOT hallucinate commands. DO NOT output example phrases like "the district court decision". Only transcribe actual human speech.' }
+        { text: 'Listen to this voice command for a web automation agent. Extract the target URL and the goal. Return ONLY JSON with no markdown or code fences: {"url": "https://...", "goal": "..."}. If the user mentions a website name, construct the full URL (e.g., "courtlistener" becomes "https://www.courtlistener.com", "oyez" becomes "https://www.oyez.org"). Default URL to https://www.google.com if no domain is specified. CRITICAL: NEVER hallucinate, guess, or construct deep links (e.g., /opinion/123/case-name). You MUST ONLY return the root base URL of the domain (e.g., "https://www.courtlistener.com", "https://www.wikipedia.org"). Put all the specific search terms, case names, and instructions into the goal field so the visual agent performs the search manually. If the audio sounds like "strat", "straight", or "track" in the context of getting or reading a case, assume the user meant the word "extract". CRITICAL: Listen to the audio carefully. If the audio contains only silence, background noise, static, or unintelligible sounds, you MUST return a JSON object with empty values: {"url": "", "goal": ""}. DO NOT hallucinate commands. DO NOT output example phrases like "the district court decision". Only transcribe actual human speech.' }
       ]
     }]
   });
@@ -40,8 +40,6 @@ export async function parseAudioCommand(audioBase64: string, mimeType: string): 
     courtlistener: "https://www.courtlistener.com",
     "court listener": "https://www.courtlistener.com",
     oyez: "https://www.oyez.org",
-    scholar: "https://scholar.google.com",
-    "google scholar": "https://scholar.google.com",
     google: "https://www.google.com",
     linkedin: "https://www.linkedin.com",
     stackoverflow: "https://stackoverflow.com",
