@@ -126,8 +126,10 @@ async function moveCursorFluidly(
 ): Promise<void> {
   const totalSteps = 80;
   for (let i = 1; i <= totalSteps; i++) {
-    const nextX = fromX + (toX - fromX) * (i / totalSteps);
-    const nextY = fromY + (toY - fromY) * (i / totalSteps);
+    const t = i / totalSteps;
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    const nextX = fromX + (toX - fromX) * ease;
+    const nextY = fromY + (toY - fromY) * ease;
     try {
       await page.evaluate(({x, y}) => {
         const c = document.getElementById("som-ghost-cursor");
@@ -135,11 +137,13 @@ async function moveCursorFluidly(
       }, { x: nextX, y: nextY });
     } catch {}
     await page.mouse.move(nextX, nextY, { steps: 1 });
-    if (i % 6 === 0 || i === totalSteps) {
+    await new Promise(r => setTimeout(r, 18));
+    if (i % 4 === 0 || i === totalSteps) {
       const snap = await takeScreenshot(page);
       send({ type: "screenshot", screenshot: snap, step });
     }
   }
+  await new Promise(r => setTimeout(r, 300));
 }
 
 async function takeScreenshot(page: Page): Promise<string> {
@@ -619,7 +623,19 @@ export async function runAgentLoop(
           send({ type: "status", message: "Analyzing video content..." });
           log(`Analyst: sending ${videoTranscript.length} chars of transcript to Gemini.`, "agent");
           try {
-            const videoPrompt = `You are an expert content analyst and researcher. The user's goal is: "${goal}". Read this YouTube video transcript and write a comprehensive, well-structured summary. Cover: Key Points and Main Arguments, Important Details and Examples, Conclusions and Takeaways. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "${videoTitle || "Video Title"}", "court": "Channel: ${videoChannel || "Unknown"}", "date": "${videoDate || ""}", "docket": "", "content": "Your comprehensive summary here"}].\n\nVideo transcript:\n${videoTranscript.slice(0, 30000)}`;
+            const safeTitle = (videoTitle || "Video Title").replace(/"/g, '\\"');
+            const safeChannel = (videoChannel || "Unknown").replace(/"/g, '\\"');
+            const safeDate = (videoDate || "").replace(/"/g, '\\"');
+            const videoPrompt = `You are an expert content analyst and researcher. The user's goal is: "${goal}". Read this YouTube video transcript and write an EXTENSIVE, detailed analysis of AT LEAST 800 words. Structure your analysis into these sections:
+
+1. VIDEO OVERVIEW: What is this video about? Who is the speaker/creator and what is the context?
+2. MAIN ARGUMENTS & KEY POINTS: What are the primary arguments, claims, or topics discussed? Detail each major point thoroughly.
+3. SUPPORTING EVIDENCE & EXAMPLES: What evidence, data, stories, or examples does the speaker use to support their points?
+4. NOTABLE QUOTES & MOMENTS: Highlight any particularly impactful statements or pivotal moments in the video.
+5. CRITICAL ANALYSIS: What are the strengths and weaknesses of the arguments presented? Are there any biases or gaps?
+6. CONCLUSIONS & TAKEAWAYS: What are the final conclusions, and what should the viewer take away from this content?
+
+Write each section as a detailed paragraph. Be thorough — this is for a premium intelligence report. Return ONLY a valid JSON array with no markdown: [{"title": "${safeTitle}", "court": "Channel: ${safeChannel}", "date": "${safeDate}", "docket": "", "content": "Your extensive 6-section analysis here"}].\n\nVideo transcript:\n${videoTranscript.slice(0, 30000)}`;
             const analystResponse = await ai.models.generateContent({
               model: "gemini-2.5-flash-lite",
               contents: [{ role: "user", parts: [{ text: videoPrompt }] }],
@@ -643,7 +659,19 @@ export async function runAgentLoop(
             let fullText = await page.evaluate(() => document.body.innerText);
             fullText = fullText.replace(/\t/g, " ").replace(/\n{3,}/g, "\n\n").replace(/ {2,}/g, " ").trim();
             if (fullText.length > 200) {
-              const videoPrompt = `You are an expert content analyst. The user's goal is: "${goal}". This is text from a YouTube video page (no transcript was available). Summarize whatever information is visible (title, description, comments). Return ONLY a valid JSON array: [{"title": "${videoTitle || "Video"}", "court": "Channel: ${videoChannel || "Unknown"}", "date": "${videoDate || ""}", "docket": "", "content": "Your summary here"}].\n\nPage text:\n${fullText.slice(0, 30000)}`;
+              const safeTitleFb = (videoTitle || "Video").replace(/"/g, '\\"');
+              const safeChannelFb = (videoChannel || "Unknown").replace(/"/g, '\\"');
+              const safeDateFb = (videoDate || "").replace(/"/g, '\\"');
+              const videoPrompt = `You are an expert content analyst. The user's goal is: "${goal}". This is text from a YouTube video page (no transcript was available). Write a detailed analysis of AT LEAST 800 words based on all available information. Structure into these sections:
+
+1. VIDEO OVERVIEW: What is the video about and who created it?
+2. KEY TOPICS DISCUSSED: Main subjects and arguments covered
+3. DETAILS FROM DESCRIPTION: Important information from the video description
+4. COMMUNITY RESPONSE: Notable points from comments or engagement metrics
+5. CRITICAL ASSESSMENT: Strengths, weaknesses, and overall quality
+6. CONCLUSIONS: Key takeaways and relevance to the user's goal
+
+Write each section as a detailed paragraph. Return ONLY a valid JSON array: [{"title": "${safeTitleFb}", "court": "Channel: ${safeChannelFb}", "date": "${safeDateFb}", "docket": "", "content": "Your extensive 6-section analysis here"}].\n\nPage text:\n${fullText.slice(0, 30000)}`;
               const analystResponse = await ai.models.generateContent({
                 model: "gemini-2.5-flash-lite",
                 contents: [{ role: "user", parts: [{ text: videoPrompt }] }],
@@ -666,7 +694,18 @@ export async function runAgentLoop(
           log(`Lawyer: sending PDF (${(pdfBuffer.length / 1024).toFixed(1)} KB) to Gemini for analysis.`, "agent");
           try {
             const pdfBase64 = pdfBuffer.toString("base64");
-            const lawyerPrompt = `You are a Senior Legal Partner. The user's goal is: "${goal}". Read this official court PDF. Write a highly professional legal summary. You MUST explicitly highlight the most important points of the case AND identify any contradictory arguments, conflicting statements, or dissenting opinions (if any). Return ONLY a valid JSON array exactly like this, with NO markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Your deep summary with important points and contradictions here"}]. For list requests, return multiple objects in the array.`;
+            const lawyerPrompt = `You are a Senior Legal Partner at a top-tier law firm. The user's goal is: "${goal}". Read this official court PDF and write an EXTENSIVE, highly detailed legal analysis of AT LEAST 800 words organized into these sections:
+
+1. CASE BACKGROUND & PARTIES: Who are the parties, what is the dispute about, and what is the factual context?
+2. PROCEDURAL HISTORY: How did this case arrive at this court? What happened in lower courts?
+3. KEY LEGAL ISSUES: What are the central legal questions the court must resolve?
+4. COURT'S ANALYSIS & REASONING: How did the court analyze each issue? What legal tests or standards were applied?
+5. IMPORTANT PRECEDENTS CITED: Which prior cases did the court rely on, and how were they applied?
+6. CONTRADICTIONS & DISSENTING OPINIONS: Identify any contradictory arguments, conflicting statements, or dissenting opinions.
+7. HOLDING & VERDICT: What did the court ultimately decide?
+8. PRACTICAL IMPLICATIONS: What does this ruling mean for future cases or parties in similar situations?
+
+Write each section as a detailed paragraph. Be thorough — this is for a premium legal intelligence report. Return ONLY a valid JSON array with NO markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Your extensive analysis here with all 8 sections"}]. For list requests, return multiple objects.`;
             const lawyerResponse = await ai.models.generateContent({
               model: "gemini-2.5-flash-lite",
               contents: [{
@@ -699,7 +738,17 @@ export async function runAgentLoop(
             fullText = fullText.replace(/\t/g, " ").replace(/\n{3,}/g, "\n\n").replace(/ {2,}/g, " ").trim();
             if (fullText.length > 200) {
               log(`Lawyer: sending ${fullText.length} chars of page text to Gemini.`, "agent");
-              const lawyerPrompt = `You are an expert legal analyst. The user's goal is: "${goal}". Read this webpage text. Write a highly professional, comprehensive 3-paragraph legal summary (Background, Core Issues, Verdict/Precedents). Ignore UI menus, navigation links, and ads. You MUST return ONLY a valid JSON array exactly like this, with no markdown and no extra text: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your 3 paragraph summary here"}]. For list requests, return multiple objects.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
+              const lawyerPrompt = `You are a Senior Legal Analyst preparing a premium intelligence report. The user's goal is: "${goal}". Read this webpage text and write an EXTENSIVE, detailed legal analysis of AT LEAST 800 words. Structure your analysis into these sections:
+
+1. CASE BACKGROUND & PARTIES: Identify all parties and the nature of the dispute
+2. PROCEDURAL HISTORY: How the case progressed through the courts
+3. KEY LEGAL ISSUES: The central legal questions at stake
+4. ANALYSIS & REASONING: How the court or parties addressed each issue
+5. IMPORTANT PRECEDENTS: Any cited cases or legal authorities referenced
+6. HOLDING & VERDICT: The final decision and its basis
+7. PRACTICAL IMPLICATIONS: What this means going forward
+
+Write each section as a thorough paragraph. Ignore UI menus, navigation links, and ads. Return ONLY a valid JSON array with no markdown: [{"title": "Case Name", "court": "Court", "date": "Date", "docket": "Docket Number", "content": "Your extensive 7-section analysis here"}]. For list requests, return multiple objects.\n\nWebpage text:\n${fullText.slice(0, 30000)}`;
               const lawyerResponse = await ai.models.generateContent({
                 model: "gemini-2.5-flash-lite",
                 contents: [{ role: "user", parts: [{ text: lawyerPrompt }] }],
@@ -836,16 +885,25 @@ export async function runAgentLoop(
           cursorX = target.x;
           cursorY = target.y;
           await page.mouse.click(target.x, target.y);
-          await page.waitForTimeout(500);
+          await page.waitForTimeout(400);
+          try {
+            await page.evaluate(({x, y}) => {
+              const el = document.elementFromPoint(x, y) as HTMLElement;
+              if (el) {
+                el.style.transition = "box-shadow 0.3s ease";
+                el.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.5)";
+                setTimeout(() => { el.style.boxShadow = ""; }, 1500);
+              }
+            }, { x: target.x, y: target.y });
+          } catch {}
+          await page.waitForTimeout(300);
           const text = action.textToType;
           for (let i = 0; i < text.length; i++) {
-            await page.keyboard.type(text[i], { delay: 180 });
-            if (i % 2 === 0 || i === text.length - 1) {
-              const snap = await takeScreenshot(page);
-              send({ type: "screenshot", screenshot: snap, step });
-            }
+            await page.keyboard.type(text[i], { delay: 220 });
+            const snap = await takeScreenshot(page);
+            send({ type: "screenshot", screenshot: snap, step });
           }
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 800));
           previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}")`);
         } else {
           send({ type: "log", message: `Warning: Element #${action.targetNumber} not found` });
