@@ -23,11 +23,10 @@ export interface WsMessageToServer {
 }
 
 export interface WsMessageToClient {
-  type: "screenshot" | "action" | "status" | "error" | "done" | "log" | "report" | "report_meta";
+  type: "screenshot" | "action" | "status" | "error" | "done" | "log" | "report";
   screenshot?: string;
   action?: AgentAction;
   message?: string;
   step?: number;
   totalMarkers?: number;
-  isPrecedentResearch?: boolean;
 }

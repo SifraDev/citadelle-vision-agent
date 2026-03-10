@@ -131,15 +131,12 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function generateReportHtml(cases: CaseData[], goal: string, fallbackText: string | null, isPrecedent: boolean = false): string {
+function generateReportHtml(cases: CaseData[], goal: string, fallbackText: string | null): string {
   const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
   const isMultiCase = cases.length > 1;
-  const caseCardsHtml = cases.map((c, i) => {
-    const label = isPrecedent ? (i === 0 ? 'Primary Case' : `Precedent ${i}`) : (isMultiCase ? `Case ${i + 1}` : null);
-    const labelStyle = isPrecedent && i === 0 ? 'background:#f0f9ff;color:#0284c7;' : isPrecedent ? 'background:#fffbeb;color:#d97706;' : 'background:#f1f5f9;color:#475569;';
-    return `
+  const caseCardsHtml = cases.map((c, i) => `
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:32px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-      ${label ? `<div style="margin-bottom:12px;"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:4px 12px;border-radius:20px;${labelStyle}">${label}</span></div>` : ''}
+      ${isMultiCase ? `<div style="margin-bottom:12px;"><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:4px 12px;border-radius:20px;${i === 0 ? 'background:#f0f9ff;color:#0284c7;' : 'background:#fffbeb;color:#d97706;'}">${i === 0 ? 'Primary Case' : `Precedent ${i}`}</span></div>` : ''}
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;">
         <div>
           <h3 style="margin:0 0 6px 0;font-size:18px;font-weight:700;color:#1a202c;">${escHtml(c.title || `Case ${i + 1}`)}</h3>
@@ -153,8 +150,8 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
       </div>
       <hr style="border:none;border-top:1px solid #f1f5f9;margin:16px 0;" />
       <div style="font-size:14px;line-height:1.75;color:#334155;white-space:pre-wrap;">${escHtml(c.content || "")}</div>
-    </div>`;
-  }).join("");
+    </div>
+  `).join("");
 
   const fallbackHtml = fallbackText ? `
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:32px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
@@ -181,7 +178,7 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
 <div style="background:#0B132B;padding:48px 32px 40px;text-align:center;">
   <div style="font-size:13px;letter-spacing:6px;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:8px;">Intelligence Division</div>
   <h1 style="font-size:36px;font-weight:800;color:#ffffff;letter-spacing:2px;margin-bottom:6px;">CITADELLE</h1>
-  <p style="font-size:16px;color:rgba(255,255,255,0.6);margin-bottom:20px;">${isPrecedent ? 'Precedent Research Report' : 'Legal Research Report'}</p>
+  <p style="font-size:16px;color:rgba(255,255,255,0.6);margin-bottom:20px;">${isMultiCase ? 'Precedent Research Report' : 'Legal Research Report'}</p>
   <div style="font-size:13px;color:rgba(255,255,255,0.35);">Generated ${dateStr}</div>
 </div>
 <div style="max-width:800px;margin:0 auto;padding:32px 24px 64px;">
@@ -190,7 +187,7 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
     <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#0284c7;font-weight:600;margin-bottom:6px;">Research Query</div>
     <div style="font-size:15px;color:#0c4a6e;font-weight:500;">${escHtml(goal)}</div>
   </div>` : ""}
-  <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600;margin-bottom:16px;">${isPrecedent ? `Precedent Research — ${cases.length} Cases` : `Extracted Cases (${cases.length || 1})`}</div>
+  <div style="font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600;margin-bottom:16px;">${isMultiCase ? `Precedent Research — ${cases.length} Cases` : `Extracted Cases (${cases.length || 1})`}</div>
   ${cases.length > 0 ? caseCardsHtml : fallbackHtml}
   <div style="text-align:center;padding:32px 0;color:#94a3b8;font-size:12px;">
     Citadelle Intelligence &mdash; Automated Legal Research Platform
@@ -203,11 +200,11 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
 </html>`;
 }
 
-function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false }: { reportRaw: string; goal: string; onClose: () => void; isPrecedentResearch?: boolean }) {
+function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal: string; onClose: () => void }) {
   const { cases, fallbackText } = parseReportData(reportRaw);
 
   const openFullReport = useCallback(() => {
-    const html = generateReportHtml(cases, goal, fallbackText, isPrecedentResearch);
+    const html = generateReportHtml(cases, goal, fallbackText);
     const newWin = window.open("", "_blank");
     if (newWin) {
       newWin.document.write(html);
@@ -227,7 +224,7 @@ function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false 
         spacing: { after: 100 },
       }),
       new Paragraph({
-        children: [new TextRun({ text: isPrecedentResearch ? "Precedent Research Report" : "Legal Research Report", size: 24, font: "Calibri", color: "666666" })],
+        children: [new TextRun({ text: "Legal Research Report", size: 24, font: "Calibri", color: "666666" })],
         alignment: AlignmentType.CENTER,
         spacing: { after: 100 },
       }),
@@ -268,10 +265,10 @@ function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false 
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [cases, goal, fallbackText, isPrecedentResearch]);
+  }, [cases, goal, fallbackText]);
 
   const openSingleCaseReport = useCallback((c: CaseData, label: string) => {
-    const html = generateReportHtml([c], goal, null, false);
+    const html = generateReportHtml([c], goal, null);
     const newWin = window.open("", "_blank");
     if (newWin) {
       newWin.document.write(html);
@@ -319,7 +316,7 @@ function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false 
         <div className="max-w-3xl mx-auto">
           <p className="text-[11px] uppercase tracking-[4px] text-white/30 mb-1">Intelligence Division</p>
           <h1 className="text-2xl font-extrabold text-white tracking-wider mb-1">CITADELLE</h1>
-          <p className="text-sm text-white/50 mb-2">{isPrecedentResearch ? 'Precedent Research Report' : 'Legal Research Report'}</p>
+          <p className="text-sm text-white/50 mb-2">{cases.length > 1 ? 'Precedent Research Report' : 'Legal Research Report'}</p>
           <p className="text-xs text-white/25">Generated {dateStr}</p>
         </div>
       </div>
@@ -334,19 +331,19 @@ function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false 
           )}
 
           <p className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-            {isPrecedentResearch ? `Precedent Research — ${cases.length} Cases` : `Extracted Cases (${cases.length || 1})`}
+            {cases.length > 1 ? `Precedent Research — ${cases.length} Cases` : `Extracted Cases (${cases.length || 1})`}
           </p>
 
           {cases.length > 0 ? cases.map((c, i) => {
-            const caseLabel = isPrecedentResearch
+            const caseLabel = cases.length > 1
               ? (i === 0 ? "Primary Case" : `Precedent ${i}`)
-              : (cases.length > 1 ? `Case ${i + 1}` : null);
+              : null;
             return (
             <Card key={i} className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm rounded-xl overflow-hidden" data-testid={`card-case-${i}`}>
               <div className="px-6 pt-5 pb-4">
                 {caseLabel && (
                   <div className="mb-2">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${isPrecedentResearch && i === 0 ? 'bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400' : isPrecedentResearch ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${i === 0 ? 'bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400'}`}>
                       {caseLabel}
                     </span>
                   </div>
@@ -369,7 +366,7 @@ function LegalBriefCard({ reportRaw, goal, onClose, isPrecedentResearch = false 
                 <div className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap max-h-[500px] overflow-y-auto pr-2">
                   {c.content}
                 </div>
-                {(isPrecedentResearch || cases.length > 1) && (
+                {cases.length > 1 && (
                   <div className="flex items-center gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
                     <Button
                       data-testid={`button-case-pdf-${i}`}
@@ -455,7 +452,6 @@ export default function Dashboard() {
     connected,
     reportData,
     lastGoal,
-    isPrecedentResearch,
     stopAgent,
     sendAudioCommand,
     clearSession,
@@ -725,7 +721,7 @@ export default function Dashboard() {
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 relative overflow-hidden bg-neutral-950">
             {showBrief ? (
-              <LegalBriefCard reportRaw={reportData} goal={lastGoal} onClose={resetSession} isPrecedentResearch={isPrecedentResearch} />
+              <LegalBriefCard reportRaw={reportData} goal={lastGoal} onClose={resetSession} />
             ) : screenshot ? (
               <div className="relative w-full h-full">
                 <img

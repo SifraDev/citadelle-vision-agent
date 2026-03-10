@@ -19,7 +19,6 @@ export function useAgentWebSocket() {
   const [connected, setConnected] = useState(false);
   const [reportData, setReportData] = useState<string | null>(null);
   const [lastGoal, setLastGoal] = useState<string>("");
-  const [isPrecedentResearch, setIsPrecedentResearch] = useState(false);
   const reportDataRef = useRef<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
@@ -123,11 +122,6 @@ export function useAgentWebSocket() {
             setStatus(msg.message || "Error occurred");
             addLog("error", msg.message || "Unknown error");
             break;
-          case "report_meta":
-            if (msg.isPrecedentResearch !== undefined) {
-              setIsPrecedentResearch(msg.isPrecedentResearch);
-            }
-            break;
           case "report":
             if (msg.message) {
               reportDataRef.current = msg.message;
@@ -175,7 +169,6 @@ export function useAgentWebSocket() {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         setAgentState("running");
         setLastGoal(goal);
-        setIsPrecedentResearch(false);
         setCurrentStep(0);
         setLogs([]);
         setScreenshot(null);
@@ -209,7 +202,6 @@ export function useAgentWebSocket() {
     setReportData(null);
     reportDataRef.current = null;
     setLastGoal("");
-    setIsPrecedentResearch(false);
     setAgentState("idle");
     setStatus("Ready");
     setCurrentStep(0);
@@ -220,7 +212,6 @@ export function useAgentWebSocket() {
     (audioBase64: string, mimeType: string) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         setAgentState("running");
-        setIsPrecedentResearch(false);
         setCurrentStep(0);
         setLogs([]);
         setScreenshot(null);
@@ -248,7 +239,6 @@ export function useAgentWebSocket() {
     connected,
     reportData,
     lastGoal,
-    isPrecedentResearch,
     startAgent,
     stopAgent,
     sendAudioCommand,
