@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
 import { useAgentWebSocket, type AgentLog } from "@/hooks/use-websocket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +24,39 @@ import {
   Shield,
   PlayCircle,
 } from "lucide-react";
+
+class ReportErrorBoundary extends Component<
+  { children: ReactNode; onReset: () => void },
+  { hasError: boolean; error: string }
+> {
+  constructor(props: { children: ReactNode; onReset: () => void }) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error?.message || "Unknown error" };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("ReportErrorBoundary caught:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">
+          <AlertCircle className="w-12 h-12 text-amber-500" />
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Report Display Error</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md">
+            The report data couldn't be displayed. This may be due to an unexpected format.
+          </p>
+          <Button onClick={this.props.onReset} variant="outline" className="mt-2">
+            Start New Session
+          </Button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function LogIcon({ type }: { type: AgentLog["type"] }) {
   switch (type) {
@@ -85,51 +118,64 @@ interface CaseData {
 }
 
 function parseReportData(raw: string): { cases: CaseData[]; fallbackText: string | null } {
-  const cleaned = raw.trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```\s*$/, "")
-    .trim();
-
-  const attempts = [
-    cleaned,
-    raw.trim(),
-  ];
-
-  for (const str of attempts) {
-    try {
-      if (str.startsWith("[")) {
-        const parsed = JSON.parse(str);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return { cases: parsed, fallbackText: null };
-        }
-      }
-    } catch {}
-  }
-
-  for (const str of attempts) {
-    try {
-      const arrMatch = str.match(/\[[\s\S]*\]/);
-      if (arrMatch) {
-        const parsed = JSON.parse(arrMatch[0]);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return { cases: parsed, fallbackText: null };
-        }
-      }
-    } catch {}
+  if (!raw || typeof raw !== "string") {
+    return { cases: [], fallbackText: raw || "No data available" };
   }
 
   try {
-    const parsed = JSON.parse(cleaned);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.title) {
-      return { cases: [parsed as CaseData], fallbackText: null };
-    }
-  } catch {}
+    const cleaned = raw.trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
 
-  return { cases: [], fallbackText: raw };
+    const attempts = [cleaned, raw.trim()];
+
+    const sanitizeCase = (c: any): CaseData => ({
+      title: String(c?.title || "Untitled"),
+      court: String(c?.court || ""),
+      date: String(c?.date || ""),
+      docket: c?.docket ? String(c.docket) : undefined,
+      content: String(c?.content || ""),
+    });
+
+    for (const str of attempts) {
+      try {
+        if (str.startsWith("[")) {
+          const parsed = JSON.parse(str);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return { cases: parsed.map(sanitizeCase), fallbackText: null };
+          }
+        }
+      } catch {}
+    }
+
+    for (const str of attempts) {
+      try {
+        const arrMatch = str.match(/\[[\s\S]*\]/);
+        if (arrMatch) {
+          const parsed = JSON.parse(arrMatch[0]);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return { cases: parsed.map(sanitizeCase), fallbackText: null };
+          }
+        }
+      } catch {}
+    }
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.title) {
+        return { cases: [sanitizeCase(parsed)], fallbackText: null };
+      }
+    } catch {}
+
+    return { cases: [], fallbackText: raw };
+  } catch {
+    return { cases: [], fallbackText: raw || "No data available" };
+  }
 }
 
 function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function generateReportHtml(cases: CaseData[], goal: string, fallbackText: string | null): string {
@@ -203,7 +249,15 @@ function generateReportHtml(cases: CaseData[], goal: string, fallbackText: strin
 }
 
 function LegalBriefCard({ reportRaw, goal, onClose }: { reportRaw: string; goal: string; onClose: () => void }) {
-  const { cases, fallbackText } = parseReportData(reportRaw);
+  let cases: CaseData[] = [];
+  let fallbackText: string | null = null;
+  try {
+    const parsed = parseReportData(reportRaw);
+    cases = parsed.cases || [];
+    fallbackText = parsed.fallbackText;
+  } catch {
+    fallbackText = reportRaw || "Unable to parse report data";
+  }
 
   const openFullReport = useCallback(() => {
     const html = generateReportHtml(cases, goal, fallbackText);
@@ -730,7 +784,9 @@ export default function Dashboard() {
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 relative overflow-hidden bg-neutral-950">
             {showBrief ? (
-              <LegalBriefCard reportRaw={reportData} goal={lastGoal} onClose={resetSession} />
+              <ReportErrorBoundary onReset={resetSession}>
+                <LegalBriefCard reportRaw={reportData || ""} goal={lastGoal || ""} onClose={resetSession} />
+              </ReportErrorBoundary>
             ) : screenshot ? (
               <div className="relative w-full h-full">
                 <img
