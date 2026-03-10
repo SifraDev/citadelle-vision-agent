@@ -174,7 +174,7 @@ Return ONLY a JSON object with NO markdown formatting, code fences, or extra tex
 
 Rules:
 - Use "click" to click on a numbered element
-- Use "type" to click a numbered input field and type text into it. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
+- Use "type" to click a numbered input field and type text into it. After typing into a search bar, Enter is AUTOMATICALLY pressed to submit — you do NOT need to find or click a search button. IMPORTANT: When typing into a search bar, DO NOT type the user's entire goal literally if it contains instructional words (like "summarized", "extract", "find", "look for", "analyze"). Extract ONLY the relevant entity names and keywords. For example, if the goal is "Epic Games versus Apple lawsuit summarized", type ONLY "Epic Games versus Apple" into the search bar
 - Use "scroll" to scroll down the page (no targetNumber needed)
 - UNIVERSAL EXTRACT RULE: Your only job as the navigator is to reach the final page containing the requested case, article, video, or document. The MOMENT you are on the correct target page, you MUST IMMEDIATELY use the "extract" action and stop navigating. DO NOT try to read the document yourself, and DO NOT try to click into specific PDF viewers or sub-tabs unless strictly necessary to reveal the page. Just get to the main page of the document/video and trigger "extract". Our universal backend will automatically detect if there is a PDF to download, a video to transcribe, or text to scrape, and will perform the deep analysis.
 - PRECEDENT RESEARCH RULE: When the user's goal asks for precedents, cited cases, case history, or authorities, follow these steps IN ORDER:
@@ -907,8 +907,27 @@ Write each section as a thorough paragraph. Ignore UI menus, navigation links, a
             const snap = await takeScreenshot(page);
             send({ type: "screenshot", screenshot: snap, step });
           }
-          await new Promise(r => setTimeout(r, 800));
-          previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}")`);
+          await new Promise(r => setTimeout(r, 400));
+          const isSearchField = await page.evaluate(({x, y}) => {
+            const el = document.elementFromPoint(x, y) as HTMLInputElement | null;
+            if (!el) return false;
+            const tag = el.tagName.toLowerCase();
+            if (tag === "textarea") return false;
+            const t = (el.type || "").toLowerCase();
+            if (t === "search") return true;
+            if (t === "password" || t === "email") return false;
+            const hints = [el.name, el.id, el.placeholder, el.getAttribute("aria-label"), el.className].join(" ").toLowerCase();
+            return /search|query|q\b|find|lookup/.test(hints);
+          }, { x: target.x, y: target.y });
+          if (isSearchField) {
+            await page.keyboard.press("Enter");
+            await new Promise(r => setTimeout(r, 1500));
+            const snapAfterEnter = await takeScreenshot(page);
+            send({ type: "screenshot", screenshot: snapAfterEnter, step });
+            previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}") and pressed Enter to submit`);
+          } else {
+            previousActions.push(`Typed "${action.textToType}" into element #${action.targetNumber} (${target.tag}: "${target.text}")`);
+          }
         } else {
           send({ type: "log", message: `Warning: Element #${action.targetNumber} not found` });
           previousActions.push(`Attempted to type into element #${action.targetNumber} but it was not found`);
