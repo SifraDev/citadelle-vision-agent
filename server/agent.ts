@@ -6,7 +6,8 @@ import { log } from "./index";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-function findChromium(): string {
+function findChromium(): string | undefined {
+  if (process.env.NODE_ENV === "production") return undefined;
   try {
     return execSync("which chromium").toString().trim();
   } catch {
