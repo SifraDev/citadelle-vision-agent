@@ -98,22 +98,16 @@ export async function removeMarkers(page: Page): Promise<void> {
 
 async function ensureGhostCursor(page: Page): Promise<void> {
   try {
-    const exists = await page.evaluate(() => !!document.getElementById("som-ghost-cursor"));
-    if (!exists) {
-      await page.addStyleTag({ content: `
-        #som-ghost-cursor {
-          position: absolute; top: 0; left: 0; width: 24px; height: 24px;
-          pointer-events: none; z-index: 2147483647;
-          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-        }
-      `});
-      await page.evaluate(() => {
-        const el = document.createElement("div");
+    await page.evaluate(() => {
+      let el = document.getElementById("som-ghost-cursor");
+      if (!el) {
+        el = document.createElement("div");
         el.id = "som-ghost-cursor";
         el.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="#38bdf8" stroke="white" stroke-width="2" stroke-linejoin="round"><path d="M5 3L19 12L12 13L9 20L5 3Z"/></svg>';
         document.body.appendChild(el);
-      });
-    }
+      }
+      el.style.cssText = "position:fixed;top:0;left:0;width:24px;height:24px;pointer-events:none;z-index:2147483647;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));";
+    });
   } catch {}
 }
 
