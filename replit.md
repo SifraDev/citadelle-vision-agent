@@ -34,10 +34,13 @@ A multimodal web agent application that uses the Set-of-Mark (SoM) technique wit
 - Activated when the user's goal matches `/precedent|cited|authorities|citing cases|case history|and its precedents|with precedents/i`
 - Agent extracts the primary case, then navigates to cited precedents and extracts those too (up to 4 total cases)
 - `collectedReports[]` accumulates Lawyer outputs across multiple extract cycles; merged into a single JSON array at the end
-- Visual agent prompt includes a PRECEDENT RESEARCH RULE instructing it to navigate to "Authorities"/"Cited by" tabs
-- Frontend labels cards as "Primary Case" / "Precedent 1" / "Precedent 2" etc. with colored badges
-- Report header changes to "Precedent Research Report" when multiple cases are present
-- HTML full report and DOCX export also include precedent labels
+- `extractedUrls` Set prevents re-extracting the same page; forces agent to navigate to a different page first
+- Visual agent prompt includes a step-by-step PRECEDENT RESEARCH RULE and ANTI-LOOP RULE (no repeated clicks or extracts)
+- Backend sends `{type: "report_meta", isPrecedentResearch: true}` before the report; frontend uses this flag for labels
+- Frontend labels: precedent mode → "Primary Case" / "Precedent 1" / "Precedent 2"; list mode → "Case 1" / "Case 2" etc.
+- Report header: "Precedent Research Report" only for precedent mode; "Legal Research Report" for regular/list extractions
+- PDF Harvester: reads `<a>` href attributes first without clicking; falls back to dropdown clicks; retries with browser cookies if `page.request.get()` returns 0 bytes
+- Per-case download buttons (Open as PDF / Export .docx) appear on each card in multi-case reports
 
 ## Frontend Features
 

@@ -186,7 +186,7 @@ Rules:
 - EXTRACTION FORMAT: When using "extract", structure the extractedData as a JSON array: [{"title": "Name", "court": "Court", "date": "Date", "docket": "Docket", "content": "Summary text"}]. Always return valid JSON array syntax.
 - CRITICAL: If the user's goal involves extracting, summarizing, reading, or analyzing any content, you are FORBIDDEN from using the "done" action. You MUST use "extract" instead. The backend handles all document processing — you just trigger "extract".
 - Use "done" ONLY when the user's goal strictly asks to navigate somewhere without needing a summary, report, or data extraction.
-- ANTI-LOOP RULE: Check your previous actions. If you clicked the SAME element number 2 or more times in a row, you MUST choose a DIFFERENT action. Either scroll down to reveal new elements, click a different element, or try a completely different approach. Repeating the same click means you are stuck and wasting steps.
+- ANTI-LOOP RULE: Check your previous actions. If you clicked the SAME element number 2 or more times in a row, you MUST choose a DIFFERENT action. Either scroll down to reveal new elements, click a different element, or try a completely different approach. Repeating the same click means you are stuck and wasting steps. This also applies to "extract" — if your previous actions say you already extracted this page, you MUST navigate to a DIFFERENT page before using "extract" again.
 - targetNumber must match a visible numbered label in the screenshot
 - Be precise and methodical
 - CRITICAL: You must return EXACTLY ONE single JSON object per turn. DO NOT chain multiple actions. DO NOT output multiple JSON blocks. Analyze the screen, pick the SINGLE best next step, output its JSON, and stop.`;
@@ -323,6 +323,7 @@ export async function runAgentLoop(
     const collectedReports: string[] = [];
     const MAX_EXTRACTS = isPrecedentGoal ? 4 : 1;
     let extractCount = 0;
+    const extractedUrls = new Set<string>();
     const previousActions: string[] = [];
 
     if (isPrecedentGoal) {
@@ -405,6 +406,15 @@ export async function runAgentLoop(
           log(`Extract allowed on search page: goal requests a list of cases.`, "agent");
         }
 
+        const currentPageUrl = page.url();
+        if (extractedUrls.has(currentPageUrl)) {
+          log(`Extract blocked: already extracted this URL (${currentPageUrl}). Forcing navigation.`, "agent");
+          send({ type: "log", message: "Already extracted this page — navigating to a different case." });
+          previousActions.push(`BLOCKED: Tried to extract ${currentPageUrl} again. ALREADY EXTRACTED. Navigate to a DIFFERENT page.`);
+          action.action = "scroll";
+          continue;
+        }
+
         await removeMarkers(page);
         const cleanScreenshot = await takeScreenshot(page);
         send({ type: "screenshot", screenshot: cleanScreenshot, step });
@@ -416,52 +426,17 @@ export async function runAgentLoop(
 
         let pdfBuffer: Buffer | null = null;
         try {
-          try {
-            const clickedTab = await page.evaluate(() => {
-              const pdfTab = Array.from(document.querySelectorAll('a, button')).find(el => {
-                const text = (el.textContent || "").trim().toLowerCase();
-                return text === 'pdf' || text === 'view pdf' || text === 'download pdf';
-              }) as HTMLElement | undefined;
-              if (pdfTab) {
-                pdfTab.click();
-                return pdfTab.textContent?.trim() || "PDF element";
-              }
-              return null;
-            });
-            if (clickedTab) {
-              log(`Harvester: clicked "${clickedTab}" tab/button to reveal PDF links.`, "agent");
-              await page.waitForTimeout(1500);
-            }
-          } catch (tabErr: any) {
-            log(`Harvester: tab click attempt skipped: ${tabErr.message}`, "agent");
-          }
-
-          try {
-            const clickedDropdown = await page.evaluate(() => {
-              const dropdownToggle = Array.from(document.querySelectorAll('button, a, [data-toggle="dropdown"]')).find(el => {
-                const text = (el.textContent || "").trim().toLowerCase();
-                return text.includes('download') && (text.includes('pdf') || text.includes('document'));
-              }) as HTMLElement | undefined;
-              if (dropdownToggle) {
-                dropdownToggle.click();
-                return dropdownToggle.textContent?.trim() || "Download button";
-              }
-              return null;
-            });
-            if (clickedDropdown) {
-              log(`Harvester: opened "${clickedDropdown}" dropdown to reveal PDF links.`, "agent");
-              await page.waitForTimeout(1000);
-            }
-          } catch (dropErr: any) {
-            log(`Harvester: dropdown click attempt skipped: ${dropErr.message}`, "agent");
-          }
-
           const pdfUrl = await page.evaluate(() => {
-            const downloadBtn = Array.from(document.querySelectorAll('a')).find(a => (a.innerText || "").toLowerCase().includes('download pdf'));
-            if (downloadBtn && (downloadBtn as HTMLAnchorElement).href) return (downloadBtn as HTMLAnchorElement).href;
+            const links = Array.from(document.querySelectorAll('a'));
 
-            const pdfTab = Array.from(document.querySelectorAll('a')).find(a => (a.innerText || "").trim().toLowerCase() === 'pdf');
-            if (pdfTab && (pdfTab as HTMLAnchorElement).href) return (pdfTab as HTMLAnchorElement).href;
+            const downloadBtn = links.find(a => (a.innerText || "").toLowerCase().includes('download pdf'));
+            if (downloadBtn?.href) return downloadBtn.href;
+
+            const pdfTab = links.find(a => (a.innerText || "").trim().toLowerCase() === 'pdf');
+            if (pdfTab?.href) return pdfTab.href;
+
+            const pdfHrefLink = links.find(a => /\/pdf\/?$/.test(a.href) || /\.pdf$/i.test(a.href));
+            if (pdfHrefLink?.href) return pdfHrefLink.href;
 
             const exactPdf = document.querySelector('a[href$=".pdf"]') as HTMLAnchorElement | null;
             if (exactPdf) return exactPdf.href;
@@ -484,11 +459,39 @@ export async function runAgentLoop(
             return null;
           });
 
-          if (pdfUrl) {
-            log(`Harvester: found PDF URL: ${pdfUrl}`, "agent");
+          if (!pdfUrl) {
+            try {
+              const clickedDropdown = await page.evaluate(() => {
+                const dropdownToggle = Array.from(document.querySelectorAll('button, a, [data-toggle="dropdown"]')).find(el => {
+                  const text = (el.textContent || "").trim().toLowerCase();
+                  return text.includes('download') && (text.includes('pdf') || text.includes('document'));
+                }) as HTMLElement | undefined;
+                if (dropdownToggle) {
+                  dropdownToggle.click();
+                  return dropdownToggle.textContent?.trim() || "Download button";
+                }
+                return null;
+              });
+              if (clickedDropdown) {
+                log(`Harvester: opened "${clickedDropdown}" dropdown to reveal PDF links.`, "agent");
+                await page.waitForTimeout(1000);
+              }
+            } catch (dropErr: any) {
+              log(`Harvester: dropdown click attempt skipped: ${dropErr.message}`, "agent");
+            }
+          }
+
+          const finalPdfUrl = pdfUrl || await page.evaluate(() => {
+            const links = Array.from(document.querySelectorAll('a'));
+            const pdfLink = links.find(a => /\.pdf/i.test(a.href) || /\/pdf\/?$/i.test(a.href));
+            return pdfLink?.href || null;
+          });
+
+          if (finalPdfUrl) {
+            log(`Harvester: found PDF URL: ${finalPdfUrl}`, "agent");
             send({ type: "status", message: "Downloading PDF document..." });
 
-            const response = await page.request.get(pdfUrl);
+            const response = await page.request.get(finalPdfUrl);
             const body = await response.body();
             if (body && body.length > 500) {
               const headerChunk = body.slice(0, 1024).toString("ascii");
@@ -496,10 +499,45 @@ export async function runAgentLoop(
                 pdfBuffer = body;
                 log(`Harvester: valid PDF confirmed (${(body.length / 1024).toFixed(1)} KB).`, "agent");
               } else {
-                log(`Harvester: downloaded file is not a valid PDF. Falling back to text.`, "agent");
+                log(`Harvester: downloaded file is not a valid PDF via page.request. Retrying with cookies...`, "agent");
               }
             } else {
-              log(`Harvester: PDF response too small (${body?.length || 0} bytes).`, "agent");
+              log(`Harvester: PDF response too small (${body?.length || 0} bytes) via page.request. Retrying with cookies...`, "agent");
+            }
+
+            if (!pdfBuffer) {
+              try {
+                const cookies = await page.context().cookies(finalPdfUrl);
+                const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join("; ");
+                const fetchResp = await fetch(finalPdfUrl, {
+                  headers: {
+                    "Cookie": cookieHeader,
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/pdf,*/*",
+                    "Referer": page.url(),
+                  },
+                  redirect: "follow",
+                });
+                if (fetchResp.ok) {
+                  const arrayBuf = await fetchResp.arrayBuffer();
+                  const fetchBody = Buffer.from(arrayBuf);
+                  if (fetchBody.length > 500) {
+                    const headerCheck = fetchBody.slice(0, 1024).toString("ascii");
+                    if (headerCheck.includes("%PDF")) {
+                      pdfBuffer = fetchBody;
+                      log(`Harvester: valid PDF confirmed via cookie fetch (${(fetchBody.length / 1024).toFixed(1)} KB).`, "agent");
+                    } else {
+                      log(`Harvester: cookie fetch returned non-PDF content (${fetchBody.length} bytes).`, "agent");
+                    }
+                  } else {
+                    log(`Harvester: cookie fetch response too small (${fetchBody.length} bytes).`, "agent");
+                  }
+                } else {
+                  log(`Harvester: cookie fetch failed with status ${fetchResp.status}.`, "agent");
+                }
+              } catch (cookieErr: any) {
+                log(`Harvester: cookie fetch error: ${cookieErr.message}`, "agent");
+              }
             }
           } else {
             log(`Harvester: no PDF link/embed found on page.`, "agent");
@@ -572,12 +610,14 @@ export async function runAgentLoop(
 
         if (shouldStop()) break;
 
+        extractedUrls.add(page.url());
         extractCount++;
         if (isPrecedentGoal && extractCount < MAX_EXTRACTS) {
           collectedReports.push(lawyerOutput);
           log(`Precedent research: extracted case ${extractCount} of ${MAX_EXTRACTS}. Continuing to find more.`, "agent");
           send({ type: "status", message: `Extracted case ${extractCount} of ${MAX_EXTRACTS}. Navigating to next precedent...` });
           send({ type: "log", message: `Case ${extractCount} extracted. Looking for precedents...` });
+          previousActions.push(`Extracted case from ${page.url()}. NOW: Click the 'Authorities' or 'Cited by' tab, then click an individual case LINK from the list (not the tab header). Do NOT extract this same page again.`);
           if (step >= MAX_STEPS) {
             let mergedCases: any[] = [];
             for (const report of collectedReports) {
@@ -590,6 +630,7 @@ export async function runAgentLoop(
                 }
               } catch {}
             }
+            send({ type: "report_meta", isPrecedentResearch: true });
             send({ type: "report", message: JSON.stringify(mergedCases) });
             log(`Precedent research: max steps reached after ${mergedCases.length} cases.`, "agent");
             send({ type: "done", message: "Precedent research complete (max steps reached)." });
@@ -612,6 +653,7 @@ export async function runAgentLoop(
             } catch {}
           }
           const finalReport = JSON.stringify(mergedCases);
+          send({ type: "report_meta", isPrecedentResearch: true });
           send({ type: "report", message: finalReport });
           log(`Precedent research complete: ${mergedCases.length} cases collected.`, "agent");
           send({ type: "log", message: `Precedent research complete — ${mergedCases.length} cases in report.` });
@@ -641,6 +683,7 @@ export async function runAgentLoop(
               }
             } catch {}
           }
+          send({ type: "report_meta", isPrecedentResearch: true });
           send({ type: "report", message: JSON.stringify(mergedCases) });
           log(`Precedent research: agent signaled done with ${mergedCases.length} collected cases.`, "agent");
           send({ type: "done", message: "Precedent research complete." });
@@ -719,6 +762,7 @@ export async function runAgentLoop(
               }
             } catch {}
           }
+          send({ type: "report_meta", isPrecedentResearch: true });
           send({ type: "report", message: JSON.stringify(mergedCases) });
           log(`Precedent research: max steps reached. Delivering ${mergedCases.length} collected cases.`, "agent");
           send({ type: "done", message: "Precedent research complete (max steps reached)." });
