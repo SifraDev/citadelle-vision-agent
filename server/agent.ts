@@ -98,8 +98,9 @@ export async function removeMarkers(page: Page): Promise<void> {
 
 async function ensureGhostCursor(page: Page): Promise<void> {
   try {
-    await page.evaluate(() => {
+    const wasCreated = await page.evaluate(() => {
       let el = document.getElementById("som-ghost-cursor");
+      const created = !el;
       if (!el) {
         el = document.createElement("div");
         el.id = "som-ghost-cursor";
@@ -107,7 +108,11 @@ async function ensureGhostCursor(page: Page): Promise<void> {
         document.body.appendChild(el);
       }
       el.style.cssText = "position:fixed;top:0;left:0;width:24px;height:24px;pointer-events:none;z-index:2147483647;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));";
+      return created;
     });
+    if (wasCreated) {
+      log("Ghost cursor injected on page", "agent");
+    }
   } catch {}
 }
 
@@ -321,6 +326,7 @@ export async function runAgentLoop(
     const collectedReports: string[] = [];
     const MAX_EXTRACTS = isPrecedentGoal ? 4 : 1;
     let extractCount = 0;
+    let searchBlockCount = 0;
     const extractedUrls = new Set<string>();
     const previousActions: string[] = [];
 
@@ -395,14 +401,18 @@ export async function runAgentLoop(
         const isListGoal = listKeywords.test(goal);
 
         if (isSearchPage && !isListGoal) {
-          log(`Extract blocked: page appears to be a search/results page (${currentUrl}). Forcing navigation.`, "agent");
+          searchBlockCount++;
+          log(`Extract blocked: page appears to be a search/results page (${currentUrl}). Block count: ${searchBlockCount}`, "agent");
           send({ type: "log", message: "Extraction blocked — still on search results. Navigating to the actual document..." });
+          previousActions.push(`EXTRACT BLOCKED (attempt ${searchBlockCount}): You are on a search/results page. You CANNOT extract here. You MUST click on a specific result (a video title, article link, or case name) to navigate to the actual content page BEFORE you can extract. DO NOT use extract again — use click on a result.`);
           action.action = "scroll";
           continue;
         }
         if (isSearchPage && isListGoal) {
           log(`Extract allowed on search page: goal requests a list of cases.`, "agent");
         }
+
+        searchBlockCount = 0;
 
         await removeMarkers(page);
         const cleanScreenshot = await takeScreenshot(page);
